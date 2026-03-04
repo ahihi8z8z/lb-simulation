@@ -26,6 +26,9 @@ lb_simulation/
   traffic.py
   request_csv_logger.py
   runner.py
+configs/
+  service_classes.example.json
+  service_classes_2class.example.json
 simulator.py               # CLI entrypoint mỏng
 design.md
 requirements.txt
@@ -39,24 +42,19 @@ pip install -r requirements.txt
 ```
 
 ## ▶️ Cách chạy
-### Chạy mặc định
+### Bắt buộc truyền file config service class
 ```bash
-python3 simulator.py
+python3 simulator.py \
+  --service-class-config configs/service_classes_2class.example.json
 ```
 
 ### Chọn policy / thời gian / số worker
 ```bash
 python3 simulator.py \
+  --service-class-config configs/service_classes.example.json \
   --t-end 1800 \
   --workers 16 \
   --policy latency_only
-```
-
-### Trace replay mode
-```bash
-python3 simulator.py \
-  --arrival-mode trace_replay \
-  --trace-file ./trace.csv
 ```
 
 ## 🧠 Chính sách load balancer hỗ trợ
@@ -78,8 +76,13 @@ python3 simulator.py \
 Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi ngay ra CSV.
 
 ```bash
-python3 simulator.py --full-log
-python3 simulator.py --full-log --full-log-file logs/requests.csv
+python3 simulator.py \
+  --service-class-config configs/service_classes.example.json \
+  --full-log
+
+python3 simulator.py \
+  --service-class-config configs/service_classes.example.json \
+  --full-log --full-log-file logs/requests.csv
 ```
 
 CSV columns:
@@ -87,6 +90,46 @@ CSV columns:
 - `t_arrival`, `t_start`, `t_done`
 - `queue_len_on_dispatch`, `n_local_at_start`, `n_global_at_start`
 - `service_time`, `latency`
+
+## 🧩 Service class config (JSON)
+Khi dùng `--service-class-config`, mỗi class có thể tự chọn:
+- `trace_replay`: trỏ tới `trace_file`
+- `modeled_gamma`: dùng `gamma_windows` hoặc `gamma` cố định
+
+File config hỗ trợ 2 dạng:
+- object có key `classes`
+- hoặc list trực tiếp các class
+
+Ví dụ:
+```json
+{
+  "classes": [
+    {
+      "class_id": 0,
+      "arrival_mode": "trace_replay",
+      "trace_file": "traces/class0.csv",
+      "zipf": { "s": 1.2, "xmin": 16, "max": 2048 }
+    },
+    {
+      "class_id": 1,
+      "arrival_mode": "modeled_gamma",
+      "gamma_windows": [
+        { "window_end": 1200, "alpha": 2.5, "beta": 0.3 },
+        { "window_end": 2400, "alpha": 2.0, "beta": 0.65 }
+      ]
+    },
+    {
+      "class_id": 2,
+      "arrival_mode": "modeled_gamma",
+      "gamma": { "alpha": 2.3, "beta": 0.4, "window_size": 1200 }
+    }
+  ]
+}
+```
+
+Ghi chú:
+- `trace_file` có thể là path tuyệt đối hoặc path tương đối theo thư mục chứa file config.
+- `--service-class-config` là option bắt buộc.
 
 ## 🧪 Dev quick check
 ```bash

@@ -12,18 +12,19 @@ from .load_balancer import LoadBalancer
 from .metrics import MetricsCollector
 from .models import Request, ServiceTimeParams
 from .request_csv_logger import RequestCsvLogger
-from .traffic import TrafficGenerator, default_gamma_windows, load_trace_csv
+from .traffic import (
+    TrafficGenerator,
+    load_service_class_config,
+)
 
 
 def run_simulation(
     t_end: float = 60 * 60,
     num_workers: int = 8,
     policy: str = "latency_only",
-    arrival_mode: str = "modeled_gamma",
-    service_classes: int = 1,
+    service_class_config: Optional[Path] = None,
     ewma_gamma: float = 0.10,
     seed: int = 42,
-    trace_file: Optional[Path] = None,
     full_log: bool = False,
     full_log_file: Optional[Path] = None,
 ) -> Dict[str, object]:
@@ -32,11 +33,13 @@ def run_simulation(
     rng = random.Random(seed)
     env = simpy.Environment()
 
-    trace_timestamps: List[float] = []
-    if arrival_mode == "trace_replay":
-        if trace_file is None:
-            raise ValueError("trace_file is required when arrival_mode='trace_replay'")
-        trace_timestamps = load_trace_csv(trace_file)
+    if service_class_config is None:
+        raise ValueError("service_class_config is required.")
+
+    class_specs = load_service_class_config(service_class_config, t_end=t_end)
+    if not class_specs:
+        raise ValueError("service_class_config does not contain any class entry.")
+    effective_service_classes = len(class_specs)
 
     metrics = MetricsCollector(num_workers=num_workers)
     logger: Optional[RequestCsvLogger] = None
@@ -67,19 +70,38 @@ def run_simulation(
         load_balancer.on_dispatch(worker_id)
         inference_pool.dispatch(request, worker_id, load_balancer)
 
-    traffic_generator = TrafficGenerator(
-        env=env,
-        t_end=t_end,
-        arrival_mode=arrival_mode,
-        on_request=on_arrival,
-        rng=rng,
-        service_classes=service_classes,
-        gamma_windows=default_gamma_windows(t_end),
-        trace_timestamps=trace_timestamps,
-    )
+    rid_counter = 0
+
+    def next_rid() -> int:
+        nonlocal rid_counter
+        rid = rid_counter
+        rid_counter += 1
+        return rid
+
+    traffic_generators: List[TrafficGenerator] = []
+    for spec in class_specs:
+        class_rng = random.Random(rng.randrange(1, 2**31))
+        traffic_generators.append(
+            TrafficGenerator(
+                env=env,
+                t_end=t_end,
+                arrival_mode=spec.arrival_mode,
+                on_request=on_arrival,
+                rng=class_rng,
+                service_classes=1,
+                zipf_s=spec.zipf_s,
+                zipf_xmin=spec.zipf_xmin,
+                zipf_max=spec.zipf_max,
+                gamma_windows=spec.gamma_windows,
+                trace_timestamps=spec.trace_timestamps,
+                fixed_class_id=spec.class_id,
+                next_rid=next_rid,
+            )
+        )
 
     try:
-        env.process(traffic_generator.run())
+        for traffic_generator in traffic_generators:
+            env.process(traffic_generator.run())
         # Keep running until all pending requests are drained.
         env.run()
     finally:
@@ -91,7 +113,9 @@ def run_simulation(
     summary["drain_time"] = max(0.0, env.now - t_end)
     summary["policy"] = policy
     summary["workers"] = num_workers
-    summary["arrival_mode"] = arrival_mode
+    summary["arrival_mode"] = "per_class_config"
+    summary["service_classes"] = effective_service_classes
+    summary["service_class_config_file"] = str(service_class_config)
     summary["full_log_enabled"] = full_log
     summary["full_log_file"] = str(log_path) if log_path else ""
     return summary
@@ -111,20 +135,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Load balancing policy",
     )
     parser.add_argument(
-        "--arrival-mode",
-        type=str,
-        default="modeled_gamma",
-        choices=["modeled_gamma", "trace_replay"],
-        help="Arrival process mode",
-    )
-    parser.add_argument(
-        "--trace-file",
+        "--service-class-config",
         type=Path,
-        default=None,
-        help="Trace CSV path (required for trace_replay mode)",
-    )
-    parser.add_argument(
-        "--service-classes", type=int, default=1, help="Number of service classes/tenants"
+        required=True,
+        help="Required JSON config for per-class traffic.",
     )
     parser.add_argument("--ewma-gamma", type=float, default=0.10, help="EWMA smoothing factor")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -149,6 +163,9 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"policy                : {summary['policy']}")
     print(f"arrival_mode          : {summary['arrival_mode']}")
     print(f"workers               : {summary['workers']}")
+    print(f"service classes       : {summary['service_classes']}")
+    if summary["service_class_config_file"]:
+        print(f"service class config  : {summary['service_class_config_file']}")
     print(f"dispatched            : {summary['dispatched']}")
     print(f"completed             : {summary['completed']}")
     print(f"throughput (req/s)    : {summary['throughput']:.4f}")
@@ -183,11 +200,9 @@ def main() -> None:
         t_end=args.t_end,
         num_workers=args.workers,
         policy=args.policy,
-        arrival_mode=args.arrival_mode,
-        service_classes=args.service_classes,
+        service_class_config=args.service_class_config,
         ewma_gamma=args.ewma_gamma,
         seed=args.seed,
-        trace_file=args.trace_file,
         full_log=args.full_log,
         full_log_file=args.full_log_file,
     )
