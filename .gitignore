@@ -12,3 +12,4 @@ venv/
 *.log
 request_full_log.csv
 logs/
+traces/
