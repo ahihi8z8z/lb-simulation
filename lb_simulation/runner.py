@@ -1,7 +1,10 @@
 """Simulation assembly, CLI parsing, and summary printing."""
 
 import argparse
+import json
 import random
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -18,6 +21,26 @@ from .traffic import (
 )
 
 
+def _create_run_dir(logs_root: Path) -> Path:
+    """Create a unique run directory under logs_root."""
+
+    logs_root.mkdir(parents=True, exist_ok=True)
+    run_stamp = datetime.now().strftime("run-%Y%m%d-%H%M%S")
+    run_dir = logs_root / run_stamp
+    suffix = 1
+    while run_dir.exists():
+        run_dir = logs_root / f"{run_stamp}-{suffix:02d}"
+        suffix += 1
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
+def _write_json(path: Path, payload: Dict[str, object]) -> None:
+    """Write a JSON file with stable formatting."""
+
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def run_simulation(
     t_end: float = 60 * 60,
     num_workers: int = 8,
@@ -26,7 +49,7 @@ def run_simulation(
     ewma_gamma: float = 0.10,
     seed: int = 42,
     full_log: bool = False,
-    full_log_file: Optional[Path] = None,
+    logs_root: Path = Path("logs"),
 ) -> Dict[str, object]:
     """Run one simulation and return aggregate metrics."""
 
@@ -41,12 +64,30 @@ def run_simulation(
         raise ValueError("service_class_config does not contain any class entry.")
     effective_service_classes = len(class_specs)
 
+    run_dir = _create_run_dir(logs_root)
+    config_snapshot_path = run_dir / "service_class_config.json"
+    shutil.copy2(service_class_config, config_snapshot_path)
+    run_config_path = run_dir / "run_config.json"
+    _write_json(
+        run_config_path,
+        {
+            "ewma_gamma": ewma_gamma,
+            "full_log": full_log,
+            "policy": policy,
+            "seed": seed,
+            "service_class_config": str(service_class_config),
+            "service_class_config_snapshot_file": str(config_snapshot_path),
+            "t_end": t_end,
+            "workers": num_workers,
+        },
+    )
+
     metrics = MetricsCollector(num_workers=num_workers)
     logger: Optional[RequestCsvLogger] = None
     log_path: Optional[Path] = None
 
     if full_log:
-        log_path = full_log_file or Path("request_full_log.csv")
+        log_path = run_dir / "request_full_log.csv"
         logger = RequestCsvLogger(log_path)
         logger.open()
 
@@ -120,6 +161,12 @@ def run_simulation(
     summary["service_class_config_file"] = str(service_class_config)
     summary["full_log_enabled"] = full_log
     summary["full_log_file"] = str(log_path) if log_path else ""
+    summary["run_config_file"] = str(run_config_path)
+    summary["run_dir"] = str(run_dir)
+    summary["service_class_config_snapshot_file"] = str(config_snapshot_path)
+    summary_file = run_dir / "summary.json"
+    summary["summary_file"] = str(summary_file)
+    _write_json(summary_file, summary)
     return summary
 
 
@@ -149,12 +196,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write every completed request to a CSV file",
     )
-    parser.add_argument(
-        "--full-log-file",
-        type=Path,
-        default=Path("request_full_log.csv"),
-        help="CSV path used when --full-log is enabled",
-    )
     return parser
 
 
@@ -168,6 +209,9 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"service classes       : {summary['service_classes']}")
     if summary["service_class_config_file"]:
         print(f"service class config  : {summary['service_class_config_file']}")
+    print(f"run dir               : {summary['run_dir']}")
+    print(f"run config file       : {summary['run_config_file']}")
+    print(f"summary file          : {summary['summary_file']}")
     print(f"dispatched            : {summary['dispatched']}")
     print(f"completed             : {summary['completed']}")
     print(f"throughput (req/s)    : {summary['throughput']:.4f}")
@@ -206,6 +250,5 @@ def main() -> None:
         ewma_gamma=args.ewma_gamma,
         seed=args.seed,
         full_log=args.full_log,
-        full_log_file=args.full_log_file,
     )
     print_summary(summary)

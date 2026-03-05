@@ -73,16 +73,21 @@ python3 simulator.py \
 - Latency theo class (nếu dùng nhiều class)
 
 ## 📝 Full request log (CSV)
-Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi ngay ra CSV.
+Mỗi lần chạy sẽ tự tạo một thư mục con trong `./logs` theo dạng:
+- `logs/run-YYYYMMDD-HHMMSS/`
+
+Artifacts luôn có trong mỗi run:
+- `run_config.json` (tham số lần chạy)
+- `service_class_config.json` (snapshot config đầu vào)
+- `summary.json` (kết quả tổng hợp)
+
+Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi vào:
+- `request_full_log.csv` trong chính thư mục run đó.
 
 ```bash
 python3 simulator.py \
   --service-class-config configs/service_classes.example.json \
   --full-log
-
-python3 simulator.py \
-  --service-class-config configs/service_classes.example.json \
-  --full-log --full-log-file logs/requests.csv
 ```
 
 CSV columns:
