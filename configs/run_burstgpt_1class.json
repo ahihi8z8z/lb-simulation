@@ -5,7 +5,7 @@
       "arrival_mode": "trace_replay",
       "trace_file": "../traces/BurstGPT_without_fails_1.csv",
       "model": "ChatGPT",
-      "log_type": "API log"
+      "log_type": "Conversation log"
     }
   ]
 }

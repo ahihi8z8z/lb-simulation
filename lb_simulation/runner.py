@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 import simpy
 
 from .inference_pool import InferencePool
-from .load_balancer import LoadBalancer
+from .load_balancer import LoadBalancer, supported_policies
 from .metrics import MetricsCollector
 from .models import Request, ServiceTimeParams
 from .request_csv_logger import RequestCsvLogger
@@ -174,14 +174,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser."""
 
     parser = argparse.ArgumentParser(description="Event-driven latency-only LB simulator (SimPy)")
+    policy_choices = supported_policies()
     parser.add_argument("--t-end", type=float, default=3600.0, help="Simulation horizon in seconds")
     parser.add_argument("--workers", type=int, default=8, help="Number of backend workers")
     parser.add_argument(
         "--policy",
         type=str,
         default="latency_only",
-        choices=["latency_only", "peak_ewma", "least_inflight", "round_robin", "random"],
-        help="Load balancing policy",
+        choices=policy_choices,
+        help=f"Load balancing policy ({', '.join(policy_choices)})",
     )
     parser.add_argument(
         "--service-class-config",

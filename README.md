@@ -64,6 +64,14 @@ python3 simulator.py \
 - `peak_ewma`
 - `latency_only` (EWMA + exploration nhẹ)
 
+Mỗi policy được module hóa trong `lb_simulation/lb_policies.py` qua cơ chế registry.
+Để thêm policy mới, chỉ cần:
+1. Tạo class kế thừa `LoadBalancingPolicy`
+2. Gắn `@register_policy`
+3. Đặt `name` duy nhất
+
+CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
+
 ## 📊 Metrics đầu ra
 - Mean / Median / P95 / P99 latency
 - Throughput
@@ -138,7 +146,7 @@ Ví dụ:
       "class_id": 1,
       "arrival_mode": "modeled_gamma",
       "model": "ChatGPT",
-      "log_type": "API log",
+      "log_type": "Conversation log",
       "gamma_windows": [
         { "window_end": 1200, "alpha": 2.5, "beta": 0.3 },
         { "window_end": 2400, "alpha": 2.0, "beta": 0.65 }
