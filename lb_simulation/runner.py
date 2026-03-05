@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 import simpy
 
+from .controller import LoadBalancerController, load_controller_config
 from .inference_pool import InferencePool
 from .load_balancer import LoadBalancer, supported_policies
 from .metrics import MetricsCollector
@@ -47,6 +48,7 @@ def run_simulation(
     policy: str = "latency_only",
     service_class_config: Optional[Path] = None,
     worker_class_config: Optional[Path] = None,
+    controller_config: Optional[Path] = None,
     ewma_gamma: float = 0.10,
     seed: int = 42,
     full_log: bool = False,
@@ -70,16 +72,29 @@ def run_simulation(
     effective_worker_classes = len(worker_class_specs)
     worker_specs = expand_worker_specs(worker_class_specs)
     num_workers = len(worker_specs)
+    controller_cfg = load_controller_config(
+        controller_config,
+        default_latency_gamma=ewma_gamma,
+    )
 
     run_dir = _create_run_dir(logs_root)
     service_config_snapshot_path = run_dir / "service_class_config.json"
     worker_config_snapshot_path = run_dir / "worker_class_config.json"
+    controller_config_snapshot_path: Optional[Path] = None
     shutil.copy2(service_class_config, service_config_snapshot_path)
     shutil.copy2(worker_class_config, worker_config_snapshot_path)
+    if controller_config is not None:
+        controller_config_snapshot_path = run_dir / "controller_config.json"
+        shutil.copy2(controller_config, controller_config_snapshot_path)
     run_config_path = run_dir / "run_config.json"
     _write_json(
         run_config_path,
         {
+            "controller_config": str(controller_config) if controller_config else "",
+            "controller_config_snapshot_file": (
+                str(controller_config_snapshot_path) if controller_config_snapshot_path else ""
+            ),
+            "controller_mode": controller_cfg.mode,
             "ewma_gamma": ewma_gamma,
             "full_log": full_log,
             "policy": policy,
@@ -109,18 +124,47 @@ def run_simulation(
         ewma_gamma=ewma_gamma,
         rng=rng,
     )
+    controller = LoadBalancerController(
+        policy=policy,
+        num_workers=num_workers,
+        config=controller_cfg,
+        rng=random.Random(rng.randrange(1, 2**31)),
+    )
+    controller.initialize(load_balancer)
+
+    def on_complete(
+        request: Request,
+        worker_id: int,
+        latency: float,
+        latency_tracked: bool,
+    ) -> None:
+        controller.on_request_complete(
+            request=request,
+            worker_id=worker_id,
+            latency=latency,
+            latency_tracked=latency_tracked,
+            lb=load_balancer,
+        )
+
     inference_pool = InferencePool(
         env=env,
         worker_specs=worker_specs,
         metrics=metrics,
+        on_complete=on_complete,
         on_request_done=logger.write if logger else None,
         rng=rng,
     )
 
     def on_arrival(request: Request) -> None:
         worker_id = load_balancer.choose_worker(request)
+        latency_tracked = controller.should_track_latency(request, worker_id)
         load_balancer.on_dispatch(worker_id)
-        inference_pool.dispatch(request, worker_id, load_balancer)
+        inference_pool.dispatch(
+            request,
+            worker_id,
+            load_balancer,
+            latency_tracked=latency_tracked,
+        )
 
     rid_counter = 0
 
@@ -172,12 +216,17 @@ def run_simulation(
     summary["service_classes"] = effective_service_classes
     summary["service_class_config_file"] = str(service_class_config)
     summary["worker_class_config_file"] = str(worker_class_config)
+    summary["controller_config_file"] = str(controller_config) if controller_config else ""
     summary["full_log_enabled"] = full_log
     summary["full_log_file"] = str(log_path) if log_path else ""
     summary["run_config_file"] = str(run_config_path)
     summary["run_dir"] = str(run_dir)
     summary["service_class_config_snapshot_file"] = str(service_config_snapshot_path)
     summary["worker_class_config_snapshot_file"] = str(worker_config_snapshot_path)
+    summary["controller_config_snapshot_file"] = (
+        str(controller_config_snapshot_path) if controller_config_snapshot_path else ""
+    )
+    summary["controller"] = controller.summarize(load_balancer)
     summary_file = run_dir / "summary.json"
     summary["summary_file"] = str(summary_file)
     _write_json(summary_file, summary)
@@ -209,6 +258,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         required=True,
         help="Required JSON config for worker classes and service models.",
     )
+    parser.add_argument(
+        "--controller-config",
+        type=Path,
+        default=None,
+        help="Optional JSON config for controller (weight control / latency tracker tuning).",
+    )
     parser.add_argument("--ewma-gamma", type=float, default=0.10, help="EWMA smoothing factor")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
@@ -232,6 +287,8 @@ def print_summary(summary: Dict[str, object]) -> None:
         print(f"service class config  : {summary['service_class_config_file']}")
     if summary["worker_class_config_file"]:
         print(f"worker class config   : {summary['worker_class_config_file']}")
+    if summary["controller_config_file"]:
+        print(f"controller config     : {summary['controller_config_file']}")
     print(f"run dir               : {summary['run_dir']}")
     print(f"run config file       : {summary['run_config_file']}")
     print(f"summary file          : {summary['summary_file']}")
@@ -250,6 +307,12 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"full log enabled      : {summary['full_log_enabled']}")
     if summary["full_log_enabled"]:
         print(f"full log file         : {summary['full_log_file']}")
+    controller = summary.get("controller")
+    if isinstance(controller, dict):
+        print(f"controller mode       : {controller.get('mode', '')}")
+        print(f"latency tracker       : {controller.get('latency_tracker_enabled', False)}")
+        print(f"latency samples       : {controller.get('latency_samples_total', 0)}")
+        print(f"wrr control mode      : {controller.get('wrr_control_mode', 'none')}")
 
     by_class = summary.get("latency_by_class", {})
     if isinstance(by_class, dict) and by_class:
@@ -270,6 +333,7 @@ def main() -> None:
         policy=args.policy,
         service_class_config=args.service_class_config,
         worker_class_config=args.worker_class_config,
+        controller_config=args.controller_config,
         ewma_gamma=args.ewma_gamma,
         seed=args.seed,
         full_log=args.full_log,

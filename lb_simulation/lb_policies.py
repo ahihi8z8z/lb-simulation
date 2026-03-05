@@ -17,6 +17,7 @@ class LoadBalancerView(Protocol):
     inflight: Sequence[int]
     penalty: Sequence[float]
     feedback_count: Sequence[int]
+    worker_weights: Sequence[float]
     explore_coef: float
     epsilon: float
     rng: random.Random
@@ -90,6 +91,33 @@ class RoundRobinPolicy(LoadBalancingPolicy):
         worker_id = self._next_worker
         self._next_worker = (self._next_worker + 1) % lb.num_workers
         return worker_id
+
+
+@register_policy
+class WeightedRoundRobinPolicy(LoadBalancingPolicy):
+    name = "weighted_round_robin"
+
+    def __init__(self) -> None:
+        self._current_weights: List[float] = []
+
+    def choose_worker(self, request: Request, lb: LoadBalancerView) -> int:
+        del request
+        if len(self._current_weights) != lb.num_workers:
+            self._current_weights = [0.0 for _ in range(lb.num_workers)]
+
+        total_weight = 0.0
+        for idx in range(lb.num_workers):
+            weight = max(1e-9, float(lb.worker_weights[idx]))
+            self._current_weights[idx] += weight
+            total_weight += weight
+
+        max_value = max(self._current_weights)
+        candidates = [
+            idx for idx, value in enumerate(self._current_weights) if value == max_value
+        ]
+        selected = lb.rng.choice(candidates)
+        self._current_weights[selected] -= total_weight
+        return selected
 
 
 @register_policy

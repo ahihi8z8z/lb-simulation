@@ -1,4 +1,4 @@
-"""Latency-feedback load balancer policies."""
+"""Load balancer state and policy dispatch."""
 
 import random
 from typing import List, Optional, Sequence
@@ -31,6 +31,7 @@ class LoadBalancer:
         self.inflight: List[int] = [0 for _ in range(num_workers)]
         self.penalty: List[float] = [0.0 for _ in range(num_workers)]
         self.feedback_count: List[int] = [0 for _ in range(num_workers)]
+        self.worker_weights: List[float] = [1.0 for _ in range(num_workers)]
         self._policy_impl = create_policy(self.policy)
 
     def argmin_score(self, scores: Sequence[float]) -> int:
@@ -45,12 +46,29 @@ class LoadBalancer:
     def on_dispatch(self, worker_id: int) -> None:
         self.inflight[worker_id] += 1
 
-    def on_complete(self, worker_id: int, latency: float) -> None:
-        previous = self.lat_ewma[worker_id]
-        gamma = self.ewma_gamma
-        self.lat_ewma[worker_id] = (1.0 - gamma) * previous + gamma * latency
+    def on_complete(self, worker_id: int) -> None:
         self.inflight[worker_id] = max(0, self.inflight[worker_id] - 1)
-        self.feedback_count[worker_id] += 1
+
+    def set_latency_estimate(self, worker_id: int, estimate: float, feedback_count: int) -> None:
+        """Apply controller-provided latency estimate for a worker."""
+
+        self.lat_ewma[worker_id] = max(1e-9, float(estimate))
+        self.feedback_count[worker_id] = max(0, int(feedback_count))
+
+    def set_worker_weights(self, weights: Sequence[float]) -> None:
+        """Apply controller-provided worker weights for WRR-like policies."""
+
+        if len(weights) != self.num_workers:
+            raise ValueError(
+                f"weights length {len(weights)} does not match num_workers {self.num_workers}."
+            )
+        normalized: List[float] = []
+        for idx, value in enumerate(weights):
+            weight = float(value)
+            if weight <= 0:
+                raise ValueError(f"weights[{idx}] must be > 0.")
+            normalized.append(weight)
+        self.worker_weights = normalized
 
 
 def supported_policies() -> List[str]:

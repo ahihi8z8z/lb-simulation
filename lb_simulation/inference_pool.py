@@ -20,6 +20,7 @@ class InferencePool:
         env: simpy.Environment,
         worker_specs: List[WorkerSpec],
         metrics: MetricsCollector,
+        on_complete: Optional[Callable[[Request, int, float, bool], None]] = None,
         on_request_done: Optional[Callable[[Dict[str, object]], None]] = None,
         rng: Optional[random.Random] = None,
     ) -> None:
@@ -28,6 +29,7 @@ class InferencePool:
             raise ValueError("InferencePool requires at least one worker.")
         self.worker_specs = worker_specs
         self.metrics = metrics
+        self.on_complete = on_complete
         self.on_request_done = on_request_done
         self.rng = rng or random.Random()
 
@@ -42,11 +44,23 @@ class InferencePool:
         context = ServiceTimeContext(job_size=job_size, n_local=n_local, n_global=n_global)
         return worker_spec.service_model_impl.sample_service_time(context, self.rng)
 
-    def dispatch(self, request: Request, worker_id: int, lb: LoadBalancer) -> None:
+    def dispatch(
+        self,
+        request: Request,
+        worker_id: int,
+        lb: LoadBalancer,
+        latency_tracked: bool = False,
+    ) -> None:
         self.global_inflight += 1
-        self.env.process(self._serve(request, worker_id, lb))
+        self.env.process(self._serve(request, worker_id, lb, latency_tracked))
 
-    def _serve(self, request: Request, worker_id: int, lb: LoadBalancer):
+    def _serve(
+        self,
+        request: Request,
+        worker_id: int,
+        lb: LoadBalancer,
+        latency_tracked: bool,
+    ):
         resource = self.resources[worker_id]
         worker_spec = self.worker_specs[worker_id]
 
@@ -67,7 +81,7 @@ class InferencePool:
 
             t_done = self.env.now
             latency = t_done - request.t_arrival
-            lb.on_complete(worker_id, latency)
+            lb.on_complete(worker_id)
             self.global_inflight = max(0, self.global_inflight - 1)
             self.metrics.record_completion(
                 worker_id=worker_id,
@@ -75,6 +89,8 @@ class InferencePool:
                 latency=latency,
                 service_time=service_time,
             )
+            if self.on_complete:
+                self.on_complete(request, worker_id, latency, latency_tracked)
 
             if self.on_request_done:
                 self.on_request_done(
@@ -93,6 +109,7 @@ class InferencePool:
                         "queue_len_on_dispatch": queue_len_on_dispatch,
                         "n_local_at_start": n_local,
                         "n_global_at_start": n_global,
+                        "latency_tracked": latency_tracked,
                         "service_time": service_time,
                         "latency": latency,
                     }

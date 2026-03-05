@@ -11,7 +11,7 @@ Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu 
 - Hỗ trợ traffic bursty và trace replay.
 
 ## 🧱 Kiến trúc nhanh
-`TrafficGenerator -> LoadBalancer -> InferencePool (workers) -> Completion -> Latency feedback`
+`TrafficGenerator -> LoadBalancer -> InferencePool (workers) -> Completion -> Controller`
 
 ## 📦 Cấu trúc mã nguồn
 ```text
@@ -21,6 +21,7 @@ lb_simulation/
   models.py
   utils.py
   metrics.py
+  controller.py
   load_balancer.py
   lb_policies.py
   inference_pool.py
@@ -34,6 +35,7 @@ configs/
   service_classes_2class.example.json
   worker_classes.example.json
   worker_classes_heterogeneous.example.json
+  controller_wrr_inverse.example.json
 simulator.py               # CLI entrypoint mỏng
 design.md
 requirements.txt
@@ -66,6 +68,7 @@ python3 simulator.py \
 ## 🧠 Chính sách load balancer hỗ trợ
 - `random`
 - `round_robin`
+- `weighted_round_robin`
 - `least_inflight`
 - `peak_ewma`
 - `latency_only` (EWMA + exploration nhẹ)
@@ -77,6 +80,20 @@ Mỗi policy được module hóa trong `lb_simulation/lb_policies.py` qua cơ c
 3. Đặt `name` duy nhất
 
 CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
+
+## 🎛️ Controller
+`Controller` là module riêng để:
+- Điều khiển tham số policy (ví dụ: `worker_weights` của `weighted_round_robin`)
+- Theo dõi latency theo kiểu sampling một phần traffic
+
+Mặc định (không truyền `--controller-config`) controller ở chế độ no-op:
+- Không điều khiển tham số policy
+
+Latency tracking đã tách khỏi Load Balancer:
+- LB không tự học latency từ toàn bộ completion.
+- Với policy cần latency (`peak_ewma`, `latency_only`), controller tự bật latency tracker.
+- Controller chỉ sample một phần nhỏ traffic (`sample_rate`) để cập nhật latency estimate.
+- Policy cần latency sẽ dùng estimate này.
 
 ## 📊 Metrics đầu ra
 - Mean / Median / P95 / P99 latency
@@ -103,6 +120,16 @@ Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi vào:
 python3 simulator.py \
   --service-class-config configs/service_classes.example.json \
   --worker-class-config configs/worker_classes.example.json \
+  --controller-config configs/controller_wrr_inverse.example.json \
+  --policy weighted_round_robin \
+  --t-end 1800
+```
+
+Hoặc chạy không controller config (mặc định no-op):
+```bash
+python3 simulator.py \
+  --service-class-config configs/service_classes.example.json \
+  --worker-class-config configs/worker_classes.example.json \
   --full-log
 ```
 
@@ -111,6 +138,7 @@ CSV columns:
 - `job_size`, `model`, `log_type`
 - `t_arrival`, `t_start`, `t_done`
 - `queue_len_on_dispatch`, `n_local_at_start`, `n_global_at_start`
+- `latency_tracked` (request này có được sample vào latency tracker hay không)
 - `service_time`, `latency`
 
 ## 🧩 Service class config (JSON)
@@ -206,6 +234,32 @@ Ví dụ:
 
 Ghi chú:
 - `--worker-class-config` là option bắt buộc.
+
+## 🧩 Controller config (JSON)
+`--controller-config` là option optional.
+
+Ví dụ:
+```json
+{
+  "mode": "none",
+  "latency_tracker": {
+    "enabled": true,
+    "sample_rate": 0.05,
+    "ewma_gamma": 0.1,
+    "init_estimate": 0.5
+  },
+  "wrr": {
+    "mode": "inverse_latency",
+    "update_every_samples": 20,
+    "inverse_power": 1.0,
+    "min_weight": 0.2,
+    "max_weight": 5.0
+  }
+}
+```
+
+Ghi chú:
+- `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
 
 ## 🧪 Dev quick check
 ```bash
