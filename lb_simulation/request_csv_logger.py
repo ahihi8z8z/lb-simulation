@@ -13,6 +13,8 @@ class RequestCsvLogger:
         "class_id",
         "worker_id",
         "job_size",
+        "model",
+        "log_type",
         "t_arrival",
         "t_start",
         "t_done",

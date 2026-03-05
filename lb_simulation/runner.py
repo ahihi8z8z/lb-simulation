@@ -93,7 +93,9 @@ def run_simulation(
                 zipf_xmin=spec.zipf_xmin,
                 zipf_max=spec.zipf_max,
                 gamma_windows=spec.gamma_windows,
-                trace_timestamps=spec.trace_timestamps,
+                trace_records=spec.trace_records,
+                model=spec.model,
+                log_type=spec.log_type,
                 fixed_class_id=spec.class_id,
                 next_rid=next_rid,
             )

@@ -13,16 +13,28 @@ from .models import Request
 
 
 @dataclass
+class TraceRecord:
+    """One request record parsed from trace CSV."""
+
+    timestamp: float
+    total_tokens: int
+    model: str
+    log_type: str
+
+
+@dataclass
 class ServiceClassTrafficSpec:
     """Traffic specification for one service class."""
 
     class_id: int
     arrival_mode: str
+    model: str = "modeled"
+    log_type: str = "modeled_gamma"
     zipf_s: float = 1.20
     zipf_xmin: int = 16
     zipf_max: int = 2048
     gamma_windows: List[Tuple[float, float, float]] = field(default_factory=list)
-    trace_timestamps: List[float] = field(default_factory=list)
+    trace_records: List[TraceRecord] = field(default_factory=list)
 
 
 class TrafficGenerator:
@@ -40,7 +52,9 @@ class TrafficGenerator:
         zipf_xmin: int = 16,
         zipf_max: int = 2048,
         gamma_windows: Optional[List[Tuple[float, float, float]]] = None,
-        trace_timestamps: Optional[List[float]] = None,
+        trace_records: Optional[List[TraceRecord]] = None,
+        model: str = "modeled",
+        log_type: str = "modeled_gamma",
         fixed_class_id: Optional[int] = None,
         next_rid: Optional[Callable[[], int]] = None,
     ) -> None:
@@ -56,7 +70,9 @@ class TrafficGenerator:
         self.zipf_max = zipf_max
 
         self.gamma_windows = gamma_windows or []
-        self.trace_timestamps = trace_timestamps or []
+        self.trace_records = trace_records or []
+        self.model = model
+        self.log_type = log_type
         self.fixed_class_id = fixed_class_id
         self.next_rid = next_rid
         self._rid = 0
@@ -72,13 +88,20 @@ class TrafficGenerator:
             return self.fixed_class_id
         return self.rng.randrange(self.service_classes)
 
-    def _build_request(self) -> Request:
+    def _build_request(
+        self,
+        job_size: Optional[int] = None,
+        model: Optional[str] = None,
+        log_type: Optional[str] = None,
+    ) -> Request:
         rid = self.next_rid() if self.next_rid else self._rid
         request = Request(
             rid=rid,
             t_arrival=self.env.now,
             class_id=self._sample_class_id(),
-            job_size=self._sample_job_size(),
+            job_size=job_size if job_size is not None else self._sample_job_size(),
+            model=model if model is not None else self.model,
+            log_type=log_type if log_type is not None else self.log_type,
         )
         if self.next_rid is None:
             self._rid += 1
@@ -107,14 +130,20 @@ class TrafficGenerator:
 
     def _run_trace_replay(self):
         last_t = 0.0
-        for timestamp in self.trace_timestamps:
-            if timestamp > self.t_end:
+        for record in self.trace_records:
+            if record.timestamp > self.t_end:
                 break
-            delta = max(0.0, timestamp - last_t)
+            delta = max(0.0, record.timestamp - last_t)
             if delta > 0:
                 yield self.env.timeout(delta)
-            last_t = timestamp
-            self.on_request(self._build_request())
+            last_t = record.timestamp
+            self.on_request(
+                self._build_request(
+                    job_size=record.total_tokens,
+                    model=record.model,
+                    log_type=record.log_type,
+                )
+            )
 
     def _run_modeled_gamma(self):
         while self.env.now < self.t_end:
@@ -167,24 +196,80 @@ def constant_gamma_windows(
     return windows
 
 
-def load_trace_csv(path: Path) -> List[float]:
-    """Load request timestamps (seconds) from a CSV-like file."""
+def _normalize_column_name(name: str) -> str:
+    """Normalize header name for robust CSV key lookup."""
 
-    timestamps: List[float] = []
-    with path.open("r", encoding="utf-8") as file:
-        reader = csv.reader(file)
-        for row in reader:
+    return " ".join(name.strip().lower().replace("_", " ").split())
+
+
+def _as_int_token_count(raw: str) -> int:
+    """Parse token count from integer-like CSV text."""
+
+    value = raw.strip().replace(",", "")
+    return int(float(value))
+
+
+def load_trace_csv(
+    path: Path,
+    default_model: str = "trace_model",
+    default_log_type: str = "trace_log",
+) -> List[TraceRecord]:
+    """Load trace records from schema with Timestamp/Total tokens/Model/Log Type."""
+
+    records: List[TraceRecord] = []
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        if reader.fieldnames is None:
+            raise ValueError(f"Trace file has no header: {path}")
+
+        normalized_to_raw = {
+            _normalize_column_name(field): field for field in reader.fieldnames if field
+        }
+
+        required = ["timestamp", "total tokens"]
+        missing = [key for key in required if key not in normalized_to_raw]
+        if missing:
+            raise ValueError(
+                f"Trace file is missing required columns {missing}: {path}"
+            )
+
+        ts_col = normalized_to_raw["timestamp"]
+        total_col = normalized_to_raw["total tokens"]
+        model_col = normalized_to_raw.get("model")
+        log_type_col = normalized_to_raw.get("log type")
+
+        for row_idx, row in enumerate(reader, start=2):
             if not row:
                 continue
-            try:
-                timestamp = float(row[0].strip())
-            except ValueError:
-                # Skip header or invalid lines.
+            ts_raw = (row.get(ts_col) or "").strip()
+            total_raw = (row.get(total_col) or "").strip()
+            if not ts_raw or not total_raw:
                 continue
-            if timestamp >= 0:
-                timestamps.append(timestamp)
 
-    return sorted(timestamps)
+            try:
+                timestamp = float(ts_raw)
+                total_tokens = _as_int_token_count(total_raw)
+            except ValueError as error:
+                raise ValueError(
+                    f"Invalid trace value at row {row_idx} in {path}: {error}"
+                ) from error
+
+            if timestamp < 0:
+                continue
+
+            model = (row.get(model_col) or "").strip() if model_col else ""
+            log_type = (row.get(log_type_col) or "").strip() if log_type_col else ""
+            records.append(
+                TraceRecord(
+                    timestamp=timestamp,
+                    total_tokens=max(1, total_tokens),
+                    model=model or default_model,
+                    log_type=log_type or default_log_type,
+                )
+            )
+
+    records.sort(key=lambda rec: rec.timestamp)
+    return records
 
 
 def _parse_gamma_windows(raw: Any) -> List[Tuple[float, float, float]]:
@@ -238,6 +323,8 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         {
           "class_id": 0,
           "arrival_mode": "trace_replay" | "modeled_gamma",
+          "model": "GPT-4",
+          "log_type": "Conversation log",
           "trace_file": "traces/class0.csv",
           "gamma_windows": [{"window_end": 1200, "alpha": 2.5, "beta": 0.3}],
           "gamma": {"alpha": 2.5, "beta": 0.3, "window_size": 1200},
@@ -271,6 +358,8 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         seen_class_ids.add(class_id)
 
         arrival_mode = str(item.get("arrival_mode", "modeled_gamma")).strip().lower()
+        model = str(item.get("model", "modeled")).strip() or "modeled"
+        log_type = str(item.get("log_type", "modeled_gamma")).strip() or "modeled_gamma"
 
         zipf_cfg = item.get("zipf", {})
         if zipf_cfg is None:
@@ -282,7 +371,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         zipf_xmin = int(zipf_cfg.get("xmin", 16))
         zipf_max = int(zipf_cfg.get("max", 2048))
 
-        trace_timestamps: List[float] = []
+        trace_records: List[TraceRecord] = []
         gamma_windows: List[Tuple[float, float, float]] = []
 
         if arrival_mode == "trace_replay":
@@ -292,7 +381,11 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                     f"classes[{idx}] requires 'trace_file' when arrival_mode='trace_replay'."
                 )
             trace_path = _resolve_trace_path(config_dir, str(trace_file))
-            trace_timestamps = load_trace_csv(trace_path)
+            trace_records = load_trace_csv(
+                trace_path,
+                default_model=model,
+                default_log_type=log_type,
+            )
 
         elif arrival_mode == "modeled_gamma":
             if item.get("gamma_windows") is not None:
@@ -324,11 +417,13 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
             ServiceClassTrafficSpec(
                 class_id=class_id,
                 arrival_mode=arrival_mode,
+                model=model,
+                log_type=log_type,
                 zipf_s=zipf_s,
                 zipf_xmin=zipf_xmin,
                 zipf_max=zipf_max,
                 gamma_windows=gamma_windows,
-                trace_timestamps=trace_timestamps,
+                trace_records=trace_records,
             )
         )
 

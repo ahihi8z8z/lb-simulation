@@ -11,6 +11,8 @@ class Request:
     t_arrival: float
     class_id: int
     job_size: int
+    model: str
+    log_type: str
 
 
 @dataclass

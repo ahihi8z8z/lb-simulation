@@ -86,6 +86,8 @@ class InferencePool:
                         "class_id": request.class_id,
                         "worker_id": worker_id,
                         "job_size": request.job_size,
+                        "model": request.model,
+                        "log_type": request.log_type,
                         "t_arrival": request.t_arrival,
                         "t_start": t_start,
                         "t_done": t_done,

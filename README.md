@@ -3,7 +3,7 @@
 Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu LLM, theo thiết kế trong `design.md`.
 
 ## 🎯 Mục tiêu
-- Đánh giá policy LB khi **không biết hidden request size**.
+- Đánh giá policy LB khi **không biết hidden job size**.
 - Backend service time phụ thuộc:
   - job size
   - local queue contention
@@ -86,7 +86,7 @@ python3 simulator.py \
 ```
 
 CSV columns:
-- `rid`, `class_id`, `worker_id`, `job_size`
+- `rid`, `class_id`, `worker_id`, `job_size`, `model`, `log_type`
 - `t_arrival`, `t_start`, `t_done`
 - `queue_len_on_dispatch`, `n_local_at_start`, `n_global_at_start`
 - `service_time`, `latency`
@@ -95,6 +95,23 @@ CSV columns:
 Khi dùng `--service-class-config`, mỗi class có thể tự chọn:
 - `trace_replay`: trỏ tới `trace_file`
 - `modeled_gamma`: dùng `gamma_windows` hoặc `gamma` cố định
+- Có thể set mặc định `model` và `log_type` cho class (đặc biệt hữu ích với `modeled_gamma`)
+
+### Trace CSV schema (trace_replay)
+File trace được đọc theo header:
+- `Timestamp`
+- `Session ID` (không bắt buộc cho simulator)
+- `Elapsed time` (không bắt buộc cho simulator)
+- `Model`
+- `Request tokens`
+- `Response tokens`
+- `Total tokens`
+- `Log Type`
+
+Mapping trong simulator:
+- `job_size = Total tokens`
+- `model = Model`
+- `log_type = Log Type`
 
 File config hỗ trợ 2 dạng:
 - object có key `classes`
@@ -107,12 +124,16 @@ Ví dụ:
     {
       "class_id": 0,
       "arrival_mode": "trace_replay",
+      "model": "GPT-4",
+      "log_type": "Conversation log",
       "trace_file": "traces/class0.csv",
       "zipf": { "s": 1.2, "xmin": 16, "max": 2048 }
     },
     {
       "class_id": 1,
       "arrival_mode": "modeled_gamma",
+      "model": "ChatGPT",
+      "log_type": "API log",
       "gamma_windows": [
         { "window_end": 1200, "alpha": 2.5, "beta": 0.3 },
         { "window_end": 2400, "alpha": 2.0, "beta": 0.65 }

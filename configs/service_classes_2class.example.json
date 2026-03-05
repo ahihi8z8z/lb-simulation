@@ -3,6 +3,8 @@
     {
       "class_id": 0,
       "arrival_mode": "trace_replay",
+      "model": "GPT-4",
+      "log_type": "Conversation log",
       "trace_file": "traces/class0.csv",
       "zipf": {
         "s": 1.2,
@@ -13,6 +15,8 @@
     {
       "class_id": 1,
       "arrival_mode": "modeled_gamma",
+      "model": "ChatGPT",
+      "log_type": "API log",
       "gamma_windows": [
         {
           "window_end": 1200,
