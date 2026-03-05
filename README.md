@@ -5,7 +5,7 @@ Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu 
 ## 🎯 Mục tiêu
 - Đánh giá policy LB khi **không biết hidden request size**.
 - Backend service time phụ thuộc:
-  - hidden size
+  - job size
   - local queue contention
   - global contention
 - Hỗ trợ traffic bursty và trace replay.
@@ -86,7 +86,7 @@ python3 simulator.py \
 ```
 
 CSV columns:
-- `rid`, `class_id`, `worker_id`, `hidden_size`
+- `rid`, `class_id`, `worker_id`, `job_size`
 - `t_arrival`, `t_start`, `t_done`
 - `queue_len_on_dispatch`, `n_local_at_start`, `n_global_at_start`
 - `service_time`, `latency`

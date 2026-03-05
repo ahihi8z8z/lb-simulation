@@ -76,7 +76,7 @@ Request(
 rid,
 t_arrival,
 class_id,
-hidden_size
+job_size
 )
 
 

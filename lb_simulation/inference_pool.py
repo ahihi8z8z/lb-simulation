@@ -34,9 +34,9 @@ class InferencePool:
         self.num_workers = num_workers
         self.global_inflight = 0
 
-    def _service_time(self, hidden_size: int, n_local: int, n_global: int) -> float:
+    def _service_time(self, job_size: int, n_local: int, n_global: int) -> float:
         # S_base(z) = a + b * z
-        base = self.st_params.a + self.st_params.b * hidden_size
+        base = self.st_params.a + self.st_params.b * job_size
         # h(n) = 1 + c * n
         local_factor = 1.0 + self.st_params.c * n_local
         # g(N) = 1 + d * max(0, N - N0)
@@ -64,7 +64,7 @@ class InferencePool:
             n_local = len(resource.queue)
             n_global = self.global_inflight
             t_start = self.env.now
-            service_time = self._service_time(request.hidden_size, n_local, n_global)
+            service_time = self._service_time(request.job_size, n_local, n_global)
 
             yield self.env.timeout(service_time)
 
@@ -85,7 +85,7 @@ class InferencePool:
                         "rid": request.rid,
                         "class_id": request.class_id,
                         "worker_id": worker_id,
-                        "hidden_size": request.hidden_size,
+                        "job_size": request.job_size,
                         "t_arrival": request.t_arrival,
                         "t_start": t_start,
                         "t_done": t_done,

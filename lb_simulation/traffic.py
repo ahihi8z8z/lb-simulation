@@ -61,7 +61,7 @@ class TrafficGenerator:
         self.next_rid = next_rid
         self._rid = 0
 
-    def _sample_hidden_size(self) -> int:
+    def _sample_job_size(self) -> int:
         # Inverse transform sampling for a truncated discrete Zipf-like distribution.
         u = self.rng.random()
         x = int(self.zipf_xmin * ((1.0 - u) ** (-1.0 / max(1e-6, self.zipf_s - 1.0))))
@@ -78,7 +78,7 @@ class TrafficGenerator:
             rid=rid,
             t_arrival=self.env.now,
             class_id=self._sample_class_id(),
-            hidden_size=self._sample_hidden_size(),
+            job_size=self._sample_job_size(),
         )
         if self.next_rid is None:
             self._rid += 1

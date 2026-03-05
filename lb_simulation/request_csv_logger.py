@@ -12,7 +12,7 @@ class RequestCsvLogger:
         "rid",
         "class_id",
         "worker_id",
-        "hidden_size",
+        "job_size",
         "t_arrival",
         "t_start",
         "t_done",

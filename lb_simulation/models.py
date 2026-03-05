@@ -10,7 +10,7 @@ class Request:
     rid: int
     t_arrival: float
     class_id: int
-    hidden_size: int
+    job_size: int
 
 
 @dataclass
