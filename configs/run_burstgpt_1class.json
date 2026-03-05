@@ -3,9 +3,9 @@
     {
       "class_id": 0,
       "arrival_mode": "trace_replay",
-      "model": "trace_default",
-      "log_type": "trace_default",
-      "trace_file": "../traces/BurstGPT_without_fails_1.csv"
+      "trace_file": "../traces/BurstGPT_without_fails_1.csv",
+      "model": "ChatGPT",
+      "log_type": "API log"
     }
   ]
 }

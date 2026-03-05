@@ -3,6 +3,7 @@
 import csv
 import json
 import random
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple
@@ -209,12 +210,34 @@ def _as_int_token_count(raw: str) -> int:
     return int(float(value))
 
 
-def load_trace_csv(
-    path: Path,
-    default_model: str = "trace_model",
-    default_log_type: str = "trace_log",
-) -> List[TraceRecord]:
-    """Load trace records from schema with Timestamp/Total tokens/Model/Log Type."""
+def _canonicalize_trace_model(raw: str) -> str:
+    """Validate and canonicalize model values coming from trace."""
+
+    normalized = "".join(raw.strip().lower().split())
+    if normalized in {"chatgpt", "chatgpt(gpt-3.5)"}:
+        return "ChatGPT"
+    if normalized == "gpt-4":
+        return "GPT-4"
+    raise ValueError(
+        "Invalid trace model value. Allowed values are ChatGPT (GPT-3.5) and GPT-4."
+    )
+
+
+def _canonicalize_trace_log_type(raw: str) -> str:
+    """Validate and canonicalize log type values coming from trace."""
+
+    normalized = " ".join(raw.strip().lower().split())
+    if normalized == "conversation log":
+        return "Conversation log"
+    if normalized == "api log":
+        return "API log"
+    raise ValueError(
+        "Invalid trace log type value. Allowed values are Conversation log and API log."
+    )
+
+
+def load_trace_csv(path: Path) -> List[TraceRecord]:
+    """Load trace records and enforce allowed model/log-type categories."""
 
     records: List[TraceRecord] = []
     with path.open("r", encoding="utf-8", newline="") as file:
@@ -226,7 +249,7 @@ def load_trace_csv(
             _normalize_column_name(field): field for field in reader.fieldnames if field
         }
 
-        required = ["timestamp", "total tokens"]
+        required = ["timestamp", "total tokens", "model", "log type"]
         missing = [key for key in required if key not in normalized_to_raw]
         if missing:
             raise ValueError(
@@ -235,8 +258,8 @@ def load_trace_csv(
 
         ts_col = normalized_to_raw["timestamp"]
         total_col = normalized_to_raw["total tokens"]
-        model_col = normalized_to_raw.get("model")
-        log_type_col = normalized_to_raw.get("log type")
+        model_col = normalized_to_raw["model"]
+        log_type_col = normalized_to_raw["log type"]
 
         for row_idx, row in enumerate(reader, start=2):
             if not row:
@@ -257,14 +280,25 @@ def load_trace_csv(
             if timestamp < 0:
                 continue
 
-            model = (row.get(model_col) or "").strip() if model_col else ""
-            log_type = (row.get(log_type_col) or "").strip() if log_type_col else ""
+            model_raw = (row.get(model_col) or "").strip()
+            log_type_raw = (row.get(log_type_col) or "").strip()
+            if not model_raw or not log_type_raw:
+                raise ValueError(
+                    f"Trace row {row_idx} in {path} has empty Model or Log Type."
+                )
+
+            try:
+                model = _canonicalize_trace_model(model_raw)
+                log_type = _canonicalize_trace_log_type(log_type_raw)
+            except ValueError as error:
+                raise ValueError(f"Trace row {row_idx} in {path}: {error}") from error
+
             records.append(
                 TraceRecord(
                     timestamp=timestamp,
                     total_tokens=max(1, total_tokens),
-                    model=model or default_model,
-                    log_type=log_type or default_log_type,
+                    model=model,
+                    log_type=log_type,
                 )
             )
 
@@ -381,11 +415,41 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                     f"classes[{idx}] requires 'trace_file' when arrival_mode='trace_replay'."
                 )
             trace_path = _resolve_trace_path(config_dir, str(trace_file))
-            trace_records = load_trace_csv(
-                trace_path,
-                default_model=model,
-                default_log_type=log_type,
-            )
+            trace_records = load_trace_csv(trace_path)
+            total_trace_records = len(trace_records)
+            try:
+                model = _canonicalize_trace_model(model)
+                log_type = _canonicalize_trace_log_type(log_type)
+            except ValueError as error:
+                raise ValueError(
+                    f"classes[{idx}] has invalid model/log_type for trace_replay: {error}"
+                ) from error
+            trace_records = [
+                record
+                for record in trace_records
+                if record.model == model and record.log_type == log_type
+            ]
+            if not trace_records:
+                warnings.warn(
+                    (
+                        f"classes[{idx}] (class_id={class_id}) matched 0 records from "
+                        f"{trace_path} with model='{model}' and log_type='{log_type}' "
+                        f"(total trace rows: {total_trace_records})."
+                    ),
+                    UserWarning,
+                    stacklevel=2,
+                )
+            elif not any(record.timestamp <= t_end for record in trace_records):
+                warnings.warn(
+                    (
+                        f"classes[{idx}] (class_id={class_id}) matched "
+                        f"{len(trace_records)} records from {trace_path}, but none are "
+                        f"within t_end={t_end}. First matched timestamp is "
+                        f"{trace_records[0].timestamp}."
+                    ),
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         elif arrival_mode == "modeled_gamma":
             if item.get("gamma_windows") is not None:
