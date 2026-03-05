@@ -36,6 +36,10 @@ configs/
   worker_classes.example.json
   worker_classes_heterogeneous.example.json
   controller_wrr_inverse.example.json
+tools/
+  plot_full_log.py
+  requirements.txt
+  README.md
 simulator.py               # CLI entrypoint mỏng
 design.md
 requirements.txt
@@ -265,3 +269,19 @@ Ghi chú:
 ```bash
 python3 -m py_compile simulator.py lb_simulation/*.py
 ```
+
+## 🧰 Tools ngoài simulator
+`tools/` chứa utility không thuộc luồng mô phỏng chính.
+
+Ví dụ tool vẽ từ full log CSV:
+```bash
+pip install -r tools/requirements.txt
+python3 tools/plot_full_log.py \
+  --full-log-csv logs/run-YYYYMMDD-HHMMSS/request_full_log.csv
+```
+
+Output:
+- `requests_over_time_total.png`
+- `requests_over_time_by_service_class.png`
+- `latency_histogram_total.png`
+- `latency_histogram_by_service_class.png`
