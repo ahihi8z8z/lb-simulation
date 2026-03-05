@@ -13,12 +13,13 @@ import simpy
 from .inference_pool import InferencePool
 from .load_balancer import LoadBalancer, supported_policies
 from .metrics import MetricsCollector
-from .models import Request, ServiceTimeParams
+from .models import Request
 from .request_csv_logger import RequestCsvLogger
 from .traffic import (
     TrafficGenerator,
     load_service_class_config,
 )
+from .workers import expand_worker_specs, load_worker_class_config
 
 
 def _create_run_dir(logs_root: Path) -> Path:
@@ -43,9 +44,9 @@ def _write_json(path: Path, payload: Dict[str, object]) -> None:
 
 def run_simulation(
     t_end: float = 60 * 60,
-    num_workers: int = 8,
     policy: str = "latency_only",
     service_class_config: Optional[Path] = None,
+    worker_class_config: Optional[Path] = None,
     ewma_gamma: float = 0.10,
     seed: int = 42,
     full_log: bool = False,
@@ -58,15 +59,23 @@ def run_simulation(
 
     if service_class_config is None:
         raise ValueError("service_class_config is required.")
+    if worker_class_config is None:
+        raise ValueError("worker_class_config is required.")
 
     class_specs = load_service_class_config(service_class_config, t_end=t_end)
     if not class_specs:
         raise ValueError("service_class_config does not contain any class entry.")
     effective_service_classes = len(class_specs)
+    worker_class_specs = load_worker_class_config(worker_class_config)
+    effective_worker_classes = len(worker_class_specs)
+    worker_specs = expand_worker_specs(worker_class_specs)
+    num_workers = len(worker_specs)
 
     run_dir = _create_run_dir(logs_root)
-    config_snapshot_path = run_dir / "service_class_config.json"
-    shutil.copy2(service_class_config, config_snapshot_path)
+    service_config_snapshot_path = run_dir / "service_class_config.json"
+    worker_config_snapshot_path = run_dir / "worker_class_config.json"
+    shutil.copy2(service_class_config, service_config_snapshot_path)
+    shutil.copy2(worker_class_config, worker_config_snapshot_path)
     run_config_path = run_dir / "run_config.json"
     _write_json(
         run_config_path,
@@ -76,8 +85,11 @@ def run_simulation(
             "policy": policy,
             "seed": seed,
             "service_class_config": str(service_class_config),
-            "service_class_config_snapshot_file": str(config_snapshot_path),
+            "service_class_config_snapshot_file": str(service_config_snapshot_path),
             "t_end": t_end,
+            "worker_class_config": str(worker_class_config),
+            "worker_class_config_snapshot_file": str(worker_config_snapshot_path),
+            "worker_classes": effective_worker_classes,
             "workers": num_workers,
         },
     )
@@ -99,8 +111,7 @@ def run_simulation(
     )
     inference_pool = InferencePool(
         env=env,
-        num_workers=num_workers,
-        st_params=ServiceTimeParams(n0=max(1, num_workers * 4)),
+        worker_specs=worker_specs,
         metrics=metrics,
         on_request_done=logger.write if logger else None,
         rng=rng,
@@ -156,14 +167,17 @@ def run_simulation(
     summary["drain_time"] = max(0.0, env.now - t_end)
     summary["policy"] = policy
     summary["workers"] = num_workers
+    summary["worker_classes"] = effective_worker_classes
     summary["arrival_mode"] = "per_class_config"
     summary["service_classes"] = effective_service_classes
     summary["service_class_config_file"] = str(service_class_config)
+    summary["worker_class_config_file"] = str(worker_class_config)
     summary["full_log_enabled"] = full_log
     summary["full_log_file"] = str(log_path) if log_path else ""
     summary["run_config_file"] = str(run_config_path)
     summary["run_dir"] = str(run_dir)
-    summary["service_class_config_snapshot_file"] = str(config_snapshot_path)
+    summary["service_class_config_snapshot_file"] = str(service_config_snapshot_path)
+    summary["worker_class_config_snapshot_file"] = str(worker_config_snapshot_path)
     summary_file = run_dir / "summary.json"
     summary["summary_file"] = str(summary_file)
     _write_json(summary_file, summary)
@@ -176,7 +190,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Event-driven latency-only LB simulator (SimPy)")
     policy_choices = supported_policies()
     parser.add_argument("--t-end", type=float, default=3600.0, help="Simulation horizon in seconds")
-    parser.add_argument("--workers", type=int, default=8, help="Number of backend workers")
     parser.add_argument(
         "--policy",
         type=str,
@@ -189,6 +202,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         required=True,
         help="Required JSON config for per-class traffic.",
+    )
+    parser.add_argument(
+        "--worker-class-config",
+        type=Path,
+        required=True,
+        help="Required JSON config for worker classes and service models.",
     )
     parser.add_argument("--ewma-gamma", type=float, default=0.10, help="EWMA smoothing factor")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -207,9 +226,12 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"policy                : {summary['policy']}")
     print(f"arrival_mode          : {summary['arrival_mode']}")
     print(f"workers               : {summary['workers']}")
+    print(f"worker classes        : {summary['worker_classes']}")
     print(f"service classes       : {summary['service_classes']}")
     if summary["service_class_config_file"]:
         print(f"service class config  : {summary['service_class_config_file']}")
+    if summary["worker_class_config_file"]:
+        print(f"worker class config   : {summary['worker_class_config_file']}")
     print(f"run dir               : {summary['run_dir']}")
     print(f"run config file       : {summary['run_config_file']}")
     print(f"summary file          : {summary['summary_file']}")
@@ -245,9 +267,9 @@ def main() -> None:
     args = build_arg_parser().parse_args()
     summary = run_simulation(
         t_end=args.t_end,
-        num_workers=args.workers,
         policy=args.policy,
         service_class_config=args.service_class_config,
+        worker_class_config=args.worker_class_config,
         ewma_gamma=args.ewma_gamma,
         seed=args.seed,
         full_log=args.full_log,

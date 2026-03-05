@@ -7,7 +7,9 @@ import simpy
 
 from .load_balancer import LoadBalancer
 from .metrics import MetricsCollector
-from .models import Request, ServiceTimeParams
+from .models import Request
+from .worker_models import ServiceTimeContext
+from .workers import WorkerSpec
 
 
 class InferencePool:
@@ -16,35 +18,29 @@ class InferencePool:
     def __init__(
         self,
         env: simpy.Environment,
-        num_workers: int,
-        st_params: ServiceTimeParams,
+        worker_specs: List[WorkerSpec],
         metrics: MetricsCollector,
         on_request_done: Optional[Callable[[Dict[str, object]], None]] = None,
         rng: Optional[random.Random] = None,
     ) -> None:
         self.env = env
-        self.st_params = st_params
+        if not worker_specs:
+            raise ValueError("InferencePool requires at least one worker.")
+        self.worker_specs = worker_specs
         self.metrics = metrics
         self.on_request_done = on_request_done
         self.rng = rng or random.Random()
 
         self.resources: List[simpy.Resource] = [
-            simpy.Resource(env, capacity=1) for _ in range(num_workers)
+            simpy.Resource(env, capacity=1) for _ in worker_specs
         ]
-        self.num_workers = num_workers
+        self.num_workers = len(worker_specs)
         self.global_inflight = 0
 
-    def _service_time(self, job_size: int, n_local: int, n_global: int) -> float:
-        # S_base(z) = a + b * z
-        base = self.st_params.a + self.st_params.b * job_size
-        # h(n) = 1 + c * n
-        local_factor = 1.0 + self.st_params.c * n_local
-        # g(N) = 1 + d * max(0, N - N0)
-        global_factor = 1.0 + self.st_params.d * max(0, n_global - self.st_params.n0)
-        # epsilon ~ LogNormal(0, sigma)
-        noise = self.rng.lognormvariate(0.0, self.st_params.sigma)
-        service = base * local_factor * global_factor * noise
-        return max(self.st_params.min_s, service)
+    def _service_time(self, worker_id: int, job_size: int, n_local: int, n_global: int) -> float:
+        worker_spec = self.worker_specs[worker_id]
+        context = ServiceTimeContext(job_size=job_size, n_local=n_local, n_global=n_global)
+        return worker_spec.service_model_impl.sample_service_time(context, self.rng)
 
     def dispatch(self, request: Request, worker_id: int, lb: LoadBalancer) -> None:
         self.global_inflight += 1
@@ -52,6 +48,7 @@ class InferencePool:
 
     def _serve(self, request: Request, worker_id: int, lb: LoadBalancer):
         resource = self.resources[worker_id]
+        worker_spec = self.worker_specs[worker_id]
 
         # Sample queue pressure at dispatch time.
         queue_len_on_dispatch = len(resource.queue) + resource.count
@@ -64,7 +61,7 @@ class InferencePool:
             n_local = len(resource.queue)
             n_global = self.global_inflight
             t_start = self.env.now
-            service_time = self._service_time(request.job_size, n_local, n_global)
+            service_time = self._service_time(worker_id, request.job_size, n_local, n_global)
 
             yield self.env.timeout(service_time)
 
@@ -85,6 +82,8 @@ class InferencePool:
                         "rid": request.rid,
                         "class_id": request.class_id,
                         "worker_id": worker_id,
+                        "worker_class_id": worker_spec.worker_class_id,
+                        "worker_service_model": worker_spec.service_model,
                         "job_size": request.job_size,
                         "model": request.model,
                         "log_type": request.log_type,

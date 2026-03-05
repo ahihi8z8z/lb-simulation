@@ -22,13 +22,18 @@ lb_simulation/
   utils.py
   metrics.py
   load_balancer.py
+  lb_policies.py
   inference_pool.py
+  workers.py
+  worker_models.py
   traffic.py
   request_csv_logger.py
   runner.py
 configs/
   service_classes.example.json
   service_classes_2class.example.json
+  worker_classes.example.json
+  worker_classes_heterogeneous.example.json
 simulator.py               # CLI entrypoint mỏng
 design.md
 requirements.txt
@@ -42,18 +47,19 @@ pip install -r requirements.txt
 ```
 
 ## ▶️ Cách chạy
-### Bắt buộc truyền file config service class
+### Bắt buộc truyền file config service class + worker class
 ```bash
 python3 simulator.py \
-  --service-class-config configs/service_classes_2class.example.json
+  --service-class-config configs/service_classes_2class.example.json \
+  --worker-class-config configs/worker_classes.example.json
 ```
 
-### Chọn policy / thời gian / số worker
+### Chọn policy / thời gian mô phỏng
 ```bash
 python3 simulator.py \
   --service-class-config configs/service_classes.example.json \
+  --worker-class-config configs/worker_classes_heterogeneous.example.json \
   --t-end 1800 \
-  --workers 16 \
   --policy latency_only
 ```
 
@@ -87,6 +93,7 @@ Mỗi lần chạy sẽ tự tạo một thư mục con trong `./logs` theo dạ
 Artifacts luôn có trong mỗi run:
 - `run_config.json` (tham số lần chạy)
 - `service_class_config.json` (snapshot config đầu vào)
+- `worker_class_config.json` (snapshot config worker)
 - `summary.json` (kết quả tổng hợp)
 
 Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi vào:
@@ -95,11 +102,13 @@ Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi vào:
 ```bash
 python3 simulator.py \
   --service-class-config configs/service_classes.example.json \
+  --worker-class-config configs/worker_classes.example.json \
   --full-log
 ```
 
 CSV columns:
-- `rid`, `class_id`, `worker_id`, `job_size`, `model`, `log_type`
+- `rid`, `class_id`, `worker_id`, `worker_class_id`, `worker_service_model`
+- `job_size`, `model`, `log_type`
 - `t_arrival`, `t_start`, `t_done`
 - `queue_len_on_dispatch`, `n_local_at_start`, `n_global_at_start`
 - `service_time`, `latency`
@@ -164,6 +173,39 @@ Ví dụ:
 Ghi chú:
 - `trace_file` có thể là path tuyệt đối hoặc path tương đối theo thư mục chứa file config.
 - `--service-class-config` là option bắt buộc.
+
+## 🧩 Worker class config (JSON)
+Worker được khai báo theo class, mỗi class có:
+- `count`: số worker trong class
+- `service_model`: mô hình phục vụ (service-time model)
+- `params`: tham số cho mô hình đó
+
+Service models built-in:
+- `contention_lognormal`: `S = (a+b*z)*(1+c*n_local)*(1+d*max(0,N-n0))*LogNormal(0,sigma)`
+- `linear_lognormal`: `S = (a+b*z)*LogNormal(0,sigma)`
+
+Ví dụ:
+```json
+{
+  "classes": [
+    {
+      "class_id": 0,
+      "count": 6,
+      "service_model": "contention_lognormal",
+      "params": { "a": 0.03, "b": 0.002, "c": 0.12, "d": 0.015, "sigma": 0.2 }
+    },
+    {
+      "class_id": 1,
+      "count": 2,
+      "service_model": "linear_lognormal",
+      "params": { "a": 0.04, "b": 0.003, "sigma": 0.1 }
+    }
+  ]
+}
+```
+
+Ghi chú:
+- `--worker-class-config` là option bắt buộc.
 
 ## 🧪 Dev quick check
 ```bash

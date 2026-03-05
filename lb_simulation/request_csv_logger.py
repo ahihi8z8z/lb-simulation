@@ -12,6 +12,8 @@ class RequestCsvLogger:
         "rid",
         "class_id",
         "worker_id",
+        "worker_class_id",
+        "worker_service_model",
         "job_size",
         "model",
         "log_type",
