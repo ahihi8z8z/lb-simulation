@@ -6,7 +6,7 @@
 |---|---|---|
 | `lb_simulation/models.py` | `Request` | Payload request chạy xuyên suốt pipeline (arrival, class, job_size, metadata). |
 | `lb_simulation/load_balancer.py` | `LoadBalancer` | Giữ state LB runtime và chọn worker theo policy. |
-| `lb_simulation/lb_policies.py` | `LoadBalancingPolicy` + subclasses | Implement thuật toán chọn worker (`random`, `rr`, `wrr`, `least_inflight`, `peak_ewma`, `latency_only`). |
+| `lb_simulation/lb_policies.py` | `LoadBalancingPolicy` + subclasses | Implement thuật toán chọn worker (`random`, `rr`, `wrr`, `least_inflight`, `latency_only`). |
 | `lb_simulation/inference_pool.py` | `InferencePool` | Mô phỏng phục vụ request trên pool worker SimPy và phát completion callback. |
 | `lb_simulation/controller.py` | `LoadBalancerController` | Điều phối latency tracker và LB control module. |
 | `lb_simulation/latency_tracker.py` | `LatencyTrackerWorker` | Sampling latency theo redirect policy, EWMA estimate theo worker. |

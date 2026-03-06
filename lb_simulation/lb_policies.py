@@ -137,19 +137,6 @@ class LeastInflightPolicy(LoadBalancingPolicy):
 
 
 @register_policy
-class PeakEwmaPolicy(LoadBalancingPolicy):
-    name = "peak_ewma"
-
-    def choose_worker(self, request: Request, lb: LoadBalancerView) -> int:
-        del request
-        scores = [
-            lb.lat_ewma[i] * (1.0 + lb.inflight[i]) + lb.penalty[i]
-            for i in range(lb.num_workers)
-        ]
-        return lb.argmin_score(scores)
-
-
-@register_policy
 class LatencyOnlyPolicy(LoadBalancingPolicy):
     name = "latency_only"
 

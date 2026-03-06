@@ -35,4 +35,4 @@
   - policy LB là `weighted_round_robin`.
   - `latency_tracker.enabled=true`.
   - có `scipy.optimize.linprog`.
-- Policy cần latency (`peak_ewma`, `latency_only`) bắt buộc bật latency tracker qua `controller-config`.
+- Policy cần latency (`latency_only`) bắt buộc bật latency tracker qua `controller-config`.

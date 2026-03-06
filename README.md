@@ -54,7 +54,6 @@ Ghi chú:
 - `round_robin`
 - `weighted_round_robin`
 - `least_inflight`
-- `peak_ewma`
 - `latency_only` (EWMA + exploration nhẹ)
 
 Mỗi policy được module hóa trong `lb_simulation/lb_policies.py` qua cơ chế registry.
@@ -76,7 +75,7 @@ Tài liệu kiến trúc controller và luồng chi tiết nằm trong thư mụ
 
 Ghi chú vận hành quan trọng:
 - Mặc định (không truyền `--controller-config`) controller ở chế độ no-op.
-- Với policy cần latency (`peak_ewma`, `latency_only`) bắt buộc truyền `--controller-config` và set `latency_tracker.enabled=true`.
+- Với policy cần latency (`latency_only`) bắt buộc truyền `--controller-config` và set `latency_tracker.enabled=true`.
 - Với `weighted_round_robin` khi `wrr.mode = lp_latency`, cũng bắt buộc `latency_tracker.enabled=true`.
 
 ## 📊 Metrics đầu ra

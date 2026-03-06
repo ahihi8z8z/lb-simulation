@@ -13,7 +13,7 @@ from .lb_control_modules import WrrLpControlParams, create_load_balancer_control
 from .latency_tracker import LatencyTrackerWorker
 from .models import Request
 
-LATENCY_AWARE_POLICIES = frozenset({"peak_ewma", "latency_only"})
+LATENCY_AWARE_POLICIES = frozenset({"latency_only"})
 logger = logging.getLogger(__name__)
 
 
