@@ -41,15 +41,15 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[on_request_complete] --> B[Tính completion_time = t_arrival + latency]
-    B --> C[Cập nhật demand_by_class trong window]
+    A["on_request_complete"] --> B["Tính completion_time = t_arrival + latency"]
+    B --> C["Cập nhật demand_by_class trong window"]
     C --> D{completion_time >= next_update_time?}
-    D -- Không --> E[Chờ completion tiếp theo]
-    D -- Có --> F[_maybe_update_weights]
-    F --> G[Build cost_by_class từ latency estimate]
-    G --> H[Giải LP bằng scipy.optimize.linprog]
-    H --> I[worker_loads]
-    I --> J[normalize + clip + EMA decay]
-    J --> K[lb.set_worker_weights]
-    K --> L[next_update_time += update_interval_seconds]
+    D -- Không --> E["Chờ completion tiếp theo"]
+    D -- Có --> F["_maybe_update_weights"]
+    F --> G["Build cost_by_class từ latency estimate"]
+    G --> H["Giải LP bằng scipy.optimize.linprog"]
+    H --> I["worker_loads"]
+    I --> J["normalize + clip + EMA decay"]
+    J --> K["lb.set_worker_weights"]
+    K --> L["next_update_time += update_interval_seconds"]
 ```
