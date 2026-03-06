@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import random
 import re
 import shutil
@@ -13,6 +14,7 @@ import simpy
 
 from .controller import LoadBalancerController, load_controller_config
 from .inference_pool import InferencePool
+from .logging_utils import configure_logging, normalize_log_mode
 from .load_balancer import (
     LoadBalancer,
     supported_policies,
@@ -25,6 +27,8 @@ from .traffic import (
     load_service_class_config,
 )
 from .workers import expand_worker_specs, load_worker_class_config
+
+logger = logging.getLogger(__name__)
 
 
 _DURATION_PATTERN = re.compile(
@@ -92,18 +96,31 @@ def run_simulation(
     worker_class_config: Optional[Path] = None,
     controller_config: Optional[Path] = None,
     seed: int = 42,
-    full_log: bool = False,
+    detail: bool = False,
+    logger_mode: str = "INFO",
     logs_root: Path = Path("logs"),
 ) -> Dict[str, object]:
     """Run one simulation and return aggregate metrics."""
-
-    rng = random.Random(seed)
-    env = simpy.Environment()
 
     if service_class_config is None:
         raise ValueError("service_class_config is required.")
     if worker_class_config is None:
         raise ValueError("worker_class_config is required.")
+
+    run_dir = _create_run_dir(logs_root)
+    runtime_log_path = configure_logging(run_dir, mode=logger_mode)
+    normalized_logger_mode = normalize_log_mode(logger_mode)
+    logger.info(
+        "Starting simulation policy=%s t_end=%.3f service_config=%s worker_config=%s",
+        policy,
+        t_end,
+        service_class_config,
+        worker_class_config,
+    )
+    logger.debug("Run directory prepared at %s", run_dir)
+
+    rng = random.Random(seed)
+    env = simpy.Environment()
 
     class_specs = load_service_class_config(service_class_config, t_end=t_end)
     if not class_specs:
@@ -120,8 +137,13 @@ def run_simulation(
         config=controller_cfg,
         rng=random.Random(rng.randrange(1, 2**31)),
     )
+    logger.info(
+        "Loaded %d service classes, %d worker classes, %d workers",
+        effective_service_classes,
+        effective_worker_classes,
+        num_workers,
+    )
 
-    run_dir = _create_run_dir(logs_root)
     service_config_snapshot_path = run_dir / "service_class_config.json"
     worker_config_snapshot_path = run_dir / "worker_class_config.json"
     controller_config_snapshot_path: Optional[Path] = None
@@ -139,7 +161,9 @@ def run_simulation(
                 str(controller_config_snapshot_path) if controller_config_snapshot_path else ""
             ),
             "controller_mode": controller_cfg.mode,
-            "full_log": full_log,
+            "detail": detail,
+            "logger_mode": normalized_logger_mode,
+            "runtime_log_file": str(runtime_log_path),
             "policy": policy,
             "seed": seed,
             "service_class_config": str(service_class_config),
@@ -154,13 +178,14 @@ def run_simulation(
     )
 
     metrics = MetricsCollector(num_workers=num_workers)
-    logger: Optional[RequestCsvLogger] = None
-    log_path: Optional[Path] = None
+    detail_writer: Optional[RequestCsvLogger] = None
+    detail_path: Optional[Path] = None
 
-    if full_log:
-        log_path = run_dir / "request_full_log.csv"
-        logger = RequestCsvLogger(log_path)
-        logger.open()
+    if detail:
+        detail_path = run_dir / "request_detail_metrics.csv"
+        detail_writer = RequestCsvLogger(detail_path)
+        detail_writer.open()
+        logger.info("Detail metrics enabled at %s", detail_path)
 
     load_balancer = LoadBalancer(
         num_workers=num_workers,
@@ -188,7 +213,7 @@ def run_simulation(
         worker_specs=worker_specs,
         metrics=metrics,
         on_complete=on_complete,
-        on_request_done=logger.write if logger else None,
+        on_request_done=detail_writer.write if detail_writer else None,
         rng=rng,
     )
 
@@ -220,6 +245,11 @@ def run_simulation(
                 ),
                 routed_via_latency_tracker=True,
             )
+            logger.debug(
+                "Request rid=%d routed via tracker -> worker=%d",
+                request.rid,
+                forwarded_worker_id,
+            )
             return
 
         load_balancer.on_dispatch(lb_selected_worker_id)
@@ -231,6 +261,11 @@ def run_simulation(
             lb_completion_worker_ids=[lb_selected_worker_id],
             lb_selected_worker_id=lb_selected_worker_id,
             routed_via_latency_tracker=False,
+        )
+        logger.debug(
+            "Request rid=%d routed directly -> worker=%d",
+            request.rid,
+            lb_selected_worker_id,
         )
 
     rid_counter = 0
@@ -270,8 +305,8 @@ def run_simulation(
         # Keep running until all pending requests are drained.
         env.run()
     finally:
-        if logger:
-            logger.close()
+        if detail_writer:
+            detail_writer.close()
 
     summary = metrics.summarize(sim_time=env.now, active_time=t_end)
     summary["sim_time_total"] = env.now
@@ -285,8 +320,10 @@ def run_simulation(
     summary["service_class_config_file"] = str(service_class_config)
     summary["worker_class_config_file"] = str(worker_class_config)
     summary["controller_config_file"] = str(controller_config) if controller_config else ""
-    summary["full_log_enabled"] = full_log
-    summary["full_log_file"] = str(log_path) if log_path else ""
+    summary["detail_enabled"] = detail
+    summary["detail_metrics_file"] = str(detail_path) if detail_path else ""
+    summary["logger_mode"] = normalized_logger_mode
+    summary["runtime_log_file"] = str(runtime_log_path)
     summary["run_config_file"] = str(run_config_path)
     summary["run_dir"] = str(run_dir)
     summary["service_class_config_snapshot_file"] = str(service_config_snapshot_path)
@@ -298,6 +335,12 @@ def run_simulation(
     summary_file = run_dir / "summary.json"
     summary["summary_file"] = str(summary_file)
     _write_json(summary_file, summary)
+    logger.info(
+        "Simulation completed dispatched=%s completed=%s mean_latency=%.4f",
+        summary["dispatched"],
+        summary["completed"],
+        summary["mean_latency"],
+    )
     return summary
 
 
@@ -339,9 +382,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
-        "--full-log",
+        "--detail",
         action="store_true",
-        help="Write every completed request to a CSV file",
+        help="Write per-request detail metrics to CSV",
+    )
+    parser.add_argument(
+        "--logger-mode",
+        type=str,
+        default="INFO",
+        help="Logger mode for console/file output (DEBUG or INFO)",
     )
     return parser
 
@@ -377,9 +426,12 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"avg utilization       : {summary['avg_utilization']:.4f}")
     print(f"sim time total (s)    : {summary['sim_time_total']:.4f}")
     print(f"drain time (s)        : {summary['drain_time']:.4f}")
-    print(f"full log enabled      : {summary['full_log_enabled']}")
-    if summary["full_log_enabled"]:
-        print(f"full log file         : {summary['full_log_file']}")
+    print(f"detail enabled        : {summary['detail_enabled']}")
+    if summary["detail_enabled"]:
+        print(f"detail metrics file   : {summary['detail_metrics_file']}")
+    print(f"logger mode           : {summary.get('logger_mode', 'INFO')}")
+    if summary.get("runtime_log_file"):
+        print(f"runtime log file      : {summary['runtime_log_file']}")
     controller = summary.get("controller")
     if isinstance(controller, dict):
         print(f"controller mode       : {controller.get('mode', '')}")
@@ -412,6 +464,10 @@ def main() -> None:
         t_end_seconds = parse_duration_seconds(args.t_end)
     except ValueError as error:
         raise SystemExit(str(error)) from error
+    try:
+        normalized_mode = normalize_log_mode(args.logger_mode)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     summary = run_simulation(
         t_end=t_end_seconds,
         policy=args.policy,
@@ -419,6 +475,7 @@ def main() -> None:
         worker_class_config=args.worker_class_config,
         controller_config=args.controller_config,
         seed=args.seed,
-        full_log=args.full_log,
+        detail=args.detail,
+        logger_mode=normalized_mode,
     )
     print_summary(summary)

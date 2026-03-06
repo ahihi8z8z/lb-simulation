@@ -1,5 +1,6 @@
 """Worker pool and service-time model."""
 
+import logging
 import random
 from typing import Callable, Dict, List, Optional
 
@@ -10,6 +11,8 @@ from .metrics import MetricsCollector
 from .models import Request
 from .worker_models import ServiceTimeContext
 from .workers import WorkerSpec
+
+logger = logging.getLogger(__name__)
 
 
 class InferencePool:
@@ -38,6 +41,7 @@ class InferencePool:
         ]
         self.num_workers = len(worker_specs)
         self.global_inflight = 0
+        logger.info("InferencePool initialized with %d workers", self.num_workers)
 
     def _service_time(self, worker_id: int, job_size: int, n_local: int, n_global: int) -> float:
         worker_spec = self.worker_specs[worker_id]
@@ -55,6 +59,13 @@ class InferencePool:
         routed_via_latency_tracker: bool = False,
     ) -> None:
         self.global_inflight += 1
+        logger.debug(
+            "Dispatch request rid=%d worker=%d tracked=%s global_inflight=%d",
+            request.rid,
+            worker_id,
+            latency_tracked,
+            self.global_inflight,
+        )
         self.env.process(
             self._serve(
                 request=request,
@@ -111,6 +122,13 @@ class InferencePool:
             )
             if self.on_complete:
                 self.on_complete(request, worker_id, latency, latency_tracked)
+            logger.debug(
+                "Completed request rid=%d worker=%d latency=%.4f tracked=%s",
+                request.rid,
+                worker_id,
+                latency,
+                latency_tracked,
+            )
 
             if self.on_request_done:
                 self.on_request_done(

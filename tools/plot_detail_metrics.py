@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot basic charts from simulator full-log CSV output."""
+"""Plot basic charts from simulator detail-metrics CSV output."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ except ImportError as error:
 
 
 @dataclass
-class FullLogSeries:
-    """Extracted series from full-log CSV."""
+class DetailMetricSeries:
+    """Extracted series from detail metrics CSV."""
 
     arrivals: List[float] = field(default_factory=list)
     completions: List[float] = field(default_factory=list)
@@ -35,8 +35,8 @@ def _append_by_class(store: Dict[str, List[float]], class_id: str, value: float)
     bucket.append(value)
 
 
-def _load_columns(csv_path: Path) -> FullLogSeries:
-    series = FullLogSeries()
+def _load_columns(csv_path: Path) -> DetailMetricSeries:
+    series = DetailMetricSeries()
 
     with csv_path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
@@ -219,12 +219,12 @@ def plot_latency_histogram_by_class(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Plot charts from request_full_log.csv")
+    parser = argparse.ArgumentParser(description="Plot charts from request_detail_metrics.csv")
     parser.add_argument(
-        "--full-log-csv",
+        "--detail-csv",
         type=Path,
-        required=True,
-        help="Path to request_full_log.csv",
+        default=None,
+        help="Path to request_detail_metrics.csv",
     )
     parser.add_argument(
         "--output-dir",
@@ -250,7 +250,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    csv_path: Path = args.full_log_csv
+    if args.detail_csv is None:
+        raise SystemExit("Missing input CSV. Use --detail-csv <path>.")
+    csv_path = args.detail_csv
     if not csv_path.exists():
         raise SystemExit(f"CSV not found: {csv_path}")
 

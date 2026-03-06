@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Protocol, Sequence, Type
 
 from .models import Request
+
+logger = logging.getLogger(__name__)
 
 
 class LoadBalancerView(Protocol):
@@ -50,6 +53,7 @@ def register_policy(
     if key in _POLICY_REGISTRY:
         raise ValueError(f"Duplicate policy registration: {key}")
     _POLICY_REGISTRY[key] = policy_cls
+    logger.debug("Registered load-balancer policy: %s", key)
     return policy_cls
 
 
@@ -67,7 +71,10 @@ def create_policy(name: str) -> LoadBalancingPolicy:
     if policy_cls is None:
         supported = ", ".join(available_policy_names())
         raise ValueError(f"Unknown policy: {name}. Available policies: {supported}")
-    return policy_cls()
+    logger.info("Creating load-balancer policy: %s", key)
+    policy = policy_cls()
+    logger.debug("Policy instance created: %s", key)
+    return policy
 
 
 @register_policy

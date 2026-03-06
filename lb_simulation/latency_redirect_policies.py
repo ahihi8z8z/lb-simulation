@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Mapping, Type
 
 from .models import Request
+
+logger = logging.getLogger(__name__)
 
 
 class LatencyRedirectPolicy(ABC):
@@ -35,6 +38,7 @@ def register_latency_redirect_policy(
     if key in _REDIRECT_POLICY_REGISTRY:
         raise ValueError(f"Duplicate latency redirect policy registration: {key}")
     _REDIRECT_POLICY_REGISTRY[key] = policy_cls
+    logger.debug("Registered latency redirect policy: %s", key)
     return policy_cls
 
 
@@ -57,7 +61,10 @@ def create_latency_redirect_policy(
         raise ValueError(
             f"Unknown latency redirect policy: {name}. Available policies: {supported}"
         )
-    return policy_cls(params=params)
+    logger.info("Creating latency redirect policy: %s", key)
+    policy = policy_cls(params=params)
+    logger.debug("Latency redirect policy created: %s params=%s", key, dict(params))
+    return policy
 
 
 def _as_float(params: Mapping[str, Any], key: str, default: float) -> float:
@@ -83,7 +90,9 @@ class FixedRateRedirectPolicy(LatencyRedirectPolicy):
 
     def should_redirect(self, request: Request, rng: random.Random) -> bool:
         del request
-        return rng.random() < self.rate
+        selected = rng.random() < self.rate
+        logger.debug("fixed_rate redirect selected=%s rate=%.4f", selected, self.rate)
+        return selected
 
 
 @register_latency_redirect_policy
@@ -106,4 +115,5 @@ class TrackAllRedirectPolicy(LatencyRedirectPolicy):
 
     def should_redirect(self, request: Request, rng: random.Random) -> bool:
         del request, rng
+        logger.debug("track_all redirect selected=True")
         return True

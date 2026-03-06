@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ class WorkerServiceModel(ABC):
 
 
 _WORKER_MODEL_REGISTRY: Dict[str, Type[WorkerServiceModel]] = {}
+logger = logging.getLogger(__name__)
 
 
 def register_worker_model(
@@ -41,6 +43,7 @@ def register_worker_model(
     if key in _WORKER_MODEL_REGISTRY:
         raise ValueError(f"Duplicate worker model registration: {key}")
     _WORKER_MODEL_REGISTRY[key] = model_cls
+    logger.debug("Registered worker model: %s", key)
     return model_cls
 
 
@@ -80,7 +83,10 @@ def create_worker_model(
         raise ValueError(
             f"Unknown worker service model: {name}. Available models: {supported}"
         )
-    return model_cls(params=params, total_workers=total_workers)
+    logger.info("Creating worker model name=%s", key)
+    model = model_cls(params=params, total_workers=total_workers)
+    logger.debug("Worker model created name=%s params=%s", key, dict(params))
+    return model
 
 
 @register_worker_model

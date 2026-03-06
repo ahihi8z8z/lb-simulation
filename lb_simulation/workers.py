@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 from .worker_models import WorkerServiceModel, create_worker_model
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,6 +58,7 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
     }
     """
 
+    logger.info("Loading worker class config from %s", path)
     with path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
@@ -100,10 +104,17 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
                 params=dict(params),
             )
         )
+        logger.debug(
+            "Worker class loaded class_id=%d count=%d model=%s",
+            class_id,
+            count,
+            service_model,
+        )
 
     if not specs:
         raise ValueError("Worker class config does not contain any class entry.")
 
+    logger.info("Worker class config loaded classes=%d", len(specs))
     return specs
 
 
@@ -138,4 +149,5 @@ def expand_worker_specs(worker_class_specs: Sequence[WorkerClassSpec]) -> List[W
                 )
             )
             next_worker_id += 1
+    logger.info("Expanded worker specs total_workers=%d", len(specs))
     return specs

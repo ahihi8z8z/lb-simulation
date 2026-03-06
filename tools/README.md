@@ -2,11 +2,11 @@
 
 Thư mục này chứa các utility script hỗ trợ phân tích/kỹ thuật, không phải phần luồng mô phỏng chính.
 
-## Plot từ full log CSV
+## Plot từ detail metrics CSV
 
-Script: `tools/plot_full_log.py`
+Script: `tools/plot_detail_metrics.py`
 
-Vẽ 4 hình từ `request_full_log.csv`:
+Vẽ 4 hình từ `request_detail_metrics.csv`:
 - `requests_over_time_total.png`: số request theo thời gian (arrivals/completions, tổng)
 - `requests_over_time_by_service_class.png`: số request theo thời gian, chia theo service class
 - `latency_histogram_total.png`: histogram latency tổng
@@ -19,8 +19,8 @@ pip install -r tools/requirements.txt
 
 ### Cách chạy
 ```bash
-python3 tools/plot_full_log.py \
-  --full-log-csv logs/run-YYYYMMDD-HHMMSS/request_full_log.csv
+python3 tools/plot_detail_metrics.py \
+  --detail-csv logs/run-YYYYMMDD-HHMMSS/request_detail_metrics.csv
 ```
 
 Tùy chọn:

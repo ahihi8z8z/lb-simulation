@@ -10,5 +10,4 @@ venv/
 
 # Local logs and generated outputs
 *.log
-request_full_log.csv
 logs/

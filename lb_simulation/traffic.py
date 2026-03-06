@@ -2,6 +2,7 @@
 
 import csv
 import json
+import logging
 import random
 import warnings
 from dataclasses import dataclass, field
@@ -11,6 +12,8 @@ from typing import Any, Callable, List, Optional, Tuple
 import simpy
 
 from .models import Request
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,6 +80,12 @@ class TrafficGenerator:
         self.fixed_class_id = fixed_class_id
         self.next_rid = next_rid
         self._rid = 0
+        logger.info(
+            "TrafficGenerator initialized mode=%s t_end=%.3f class_id=%s",
+            self.arrival_mode,
+            self.t_end,
+            self.fixed_class_id,
+        )
 
     def _sample_job_size(self) -> int:
         # Inverse transform sampling for a truncated discrete Zipf-like distribution.
@@ -106,6 +115,14 @@ class TrafficGenerator:
         )
         if self.next_rid is None:
             self._rid += 1
+        logger.debug(
+            "Built request rid=%d class=%d job_size=%d model=%s log_type=%s",
+            request.rid,
+            request.class_id,
+            request.job_size,
+            request.model,
+            request.log_type,
+        )
         return request
 
     def _current_gamma_params(self, now: float) -> Tuple[float, float]:
@@ -240,6 +257,7 @@ def load_trace_csv(path: Path) -> List[TraceRecord]:
     """Load trace records and enforce allowed model/log-type categories."""
 
     records: List[TraceRecord] = []
+    logger.info("Loading trace CSV from %s", path)
     with path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
         if reader.fieldnames is None:
@@ -303,6 +321,7 @@ def load_trace_csv(path: Path) -> List[TraceRecord]:
             )
 
     records.sort(key=lambda rec: rec.timestamp)
+    logger.info("Loaded %d trace records from %s", len(records), path)
     return records
 
 
@@ -368,6 +387,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
     }
     """
 
+    logger.info("Loading service class config from %s", path)
     with path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
@@ -490,5 +510,12 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                 trace_records=trace_records,
             )
         )
+        logger.debug(
+            "Loaded service class class_id=%d mode=%s trace_records=%d",
+            class_id,
+            arrival_mode,
+            len(trace_records),
+        )
 
+    logger.info("Service class config loaded classes=%d", len(specs))
     return specs

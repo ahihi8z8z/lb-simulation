@@ -22,6 +22,7 @@ lb_simulation/
   utils.py
   metrics.py
   controller.py
+  logging_utils.py
   latency_redirect_policies.py
   load_balancer.py
   lb_policies.py
@@ -39,7 +40,7 @@ configs/
   controller_wrr_inverse.example.json
   controller_track_all.example.json
 tools/
-  plot_full_log.py
+  plot_detail_metrics.py
   requirements.txt
   README.md
 simulator.py               # CLI entrypoint mỏng
@@ -113,7 +114,7 @@ Latency tracking đã tách khỏi Load Balancer:
 - Worker utilization
 - Latency theo class (nếu dùng nhiều class)
 
-## 📝 Full request log (CSV)
+## 📝 Request Detail Metrics (CSV)
 Mỗi lần chạy sẽ tự tạo một thư mục con trong `./logs` theo dạng:
 - `logs/run-YYYYMMDD-HHMMSS/`
 
@@ -123,8 +124,8 @@ Artifacts luôn có trong mỗi run:
 - `worker_class_config.json` (snapshot config worker)
 - `summary.json` (kết quả tổng hợp)
 
-Khi bật `--full-log`, mọi request hoàn thành sẽ được ghi vào:
-- `request_full_log.csv` trong chính thư mục run đó.
+Khi bật `--detail`, mọi request hoàn thành sẽ được ghi vào:
+- `request_detail_metrics.csv` trong chính thư mục run đó.
 
 ```bash
 python3 simulator.py \
@@ -140,7 +141,7 @@ Hoặc chạy không controller config (mặc định no-op):
 python3 simulator.py \
   --service-class-config configs/service_classes.example.json \
   --worker-class-config configs/worker_classes.example.json \
-  --full-log
+  --detail
 ```
 
 CSV columns:
@@ -289,12 +290,17 @@ python3 -m py_compile simulator.py lb_simulation/*.py
 ## 🧰 Tools ngoài simulator
 `tools/` chứa utility không thuộc luồng mô phỏng chính.
 
-Ví dụ tool vẽ từ full log CSV:
+Ví dụ tool vẽ từ detail metrics CSV:
 ```bash
 pip install -r tools/requirements.txt
-python3 tools/plot_full_log.py \
-  --full-log-csv logs/run-YYYYMMDD-HHMMSS/request_full_log.csv
+python3 tools/plot_detail_metrics.py \
+  --detail-csv logs/run-YYYYMMDD-HHMMSS/request_detail_metrics.csv
 ```
+
+Logger:
+- `--logger-mode INFO` (mặc định): log mức INFO trở lên.
+- `--logger-mode DEBUG`: bật thêm log DEBUG.
+- Runtime log luôn được lưu vào `runtime.log` trong thư mục run.
 
 Output:
 - `requests_over_time_total.png`

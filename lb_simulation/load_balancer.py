@@ -1,10 +1,13 @@
 """Load balancer state and policy dispatch."""
 
+import logging
 import random
 from typing import Callable, Dict, List, Optional, Sequence
 
 from .lb_policies import available_policy_names, create_policy
 from .models import Request
+
+logger = logging.getLogger(__name__)
 
 
 class LoadBalancer:
@@ -36,6 +39,11 @@ class LoadBalancer:
         self.latency_tracker_dispatches = 0
         self._should_redirect_to_tracker: Optional[Callable[[Request], bool]] = None
         self._redirect_target_by_rid: Dict[int, int] = {}
+        logger.info(
+            "LoadBalancer initialized policy=%s workers=%d",
+            self.policy,
+            self.num_workers,
+        )
 
     def argmin_score(self, scores: Sequence[float]) -> int:
         min_val = min(scores)
@@ -49,7 +57,13 @@ class LoadBalancer:
             should_redirect = self._should_redirect_to_tracker(request)
             if should_redirect and self.latency_tracker_worker_id is not None:
                 self._redirect_target_by_rid[request.rid] = worker_id
+                logger.debug(
+                    "Request rid=%d redirected to latency tracker (selected_worker=%d)",
+                    request.rid,
+                    worker_id,
+                )
                 return self.latency_tracker_worker_id
+        logger.debug("Request rid=%d selected worker=%d", request.rid, worker_id)
         return worker_id
 
     def on_dispatch(self, worker_id: int) -> None:
@@ -59,8 +73,15 @@ class LoadBalancer:
         ):
             self.latency_tracker_inflight += 1
             self.latency_tracker_dispatches += 1
+            logger.debug(
+                "Tracker dispatch worker=%d inflight=%d total=%d",
+                worker_id,
+                self.latency_tracker_inflight,
+                self.latency_tracker_dispatches,
+            )
             return
         self.inflight[worker_id] += 1
+        logger.debug("Worker dispatch worker=%d inflight=%d", worker_id, self.inflight[worker_id])
 
     def on_complete(self, worker_id: int) -> None:
         if (
@@ -68,8 +89,14 @@ class LoadBalancer:
             and worker_id == self.latency_tracker_worker_id
         ):
             self.latency_tracker_inflight = max(0, self.latency_tracker_inflight - 1)
+            logger.debug(
+                "Tracker complete worker=%d inflight=%d",
+                worker_id,
+                self.latency_tracker_inflight,
+            )
             return
         self.inflight[worker_id] = max(0, self.inflight[worker_id] - 1)
+        logger.debug("Worker complete worker=%d inflight=%d", worker_id, self.inflight[worker_id])
 
     def configure_latency_tracker(
         self,
@@ -86,17 +113,30 @@ class LoadBalancer:
             )
         self.latency_tracker_worker_id = tracker_worker_id
         self._should_redirect_to_tracker = should_redirect
+        logger.info("Latency tracker configured with worker_id=%d", tracker_worker_id)
 
     def consume_redirect_target(self, request_id: int) -> Optional[int]:
         """Get and clear real worker selected before tracker redirection."""
 
-        return self._redirect_target_by_rid.pop(request_id, None)
+        selected = self._redirect_target_by_rid.pop(request_id, None)
+        logger.debug(
+            "Consume redirect target rid=%d selected_worker=%s",
+            request_id,
+            selected,
+        )
+        return selected
 
     def set_latency_estimate(self, worker_id: int, estimate: float, feedback_count: int) -> None:
         """Apply controller-provided latency estimate for a worker."""
 
         self.lat_ewma[worker_id] = max(1e-9, float(estimate))
         self.feedback_count[worker_id] = max(0, int(feedback_count))
+        logger.debug(
+            "Updated latency estimate worker=%d estimate=%.6f feedback=%d",
+            worker_id,
+            self.lat_ewma[worker_id],
+            self.feedback_count[worker_id],
+        )
 
     def set_worker_weights(self, weights: Sequence[float]) -> None:
         """Apply controller-provided worker weights for WRR-like policies."""
@@ -112,6 +152,7 @@ class LoadBalancer:
                 raise ValueError(f"weights[{idx}] must be > 0.")
             normalized.append(weight)
         self.worker_weights = normalized
+        logger.info("Updated worker weights: %s", [round(value, 6) for value in normalized])
 
 
 def supported_policies() -> List[str]:

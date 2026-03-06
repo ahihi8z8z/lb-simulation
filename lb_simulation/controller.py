@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,7 @@ from .latency_redirect_policies import create_latency_redirect_policy
 from .models import Request
 
 LATENCY_AWARE_POLICIES = frozenset({"peak_ewma", "latency_only"})
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -191,13 +193,17 @@ def load_controller_config(
     """Load controller config from optional JSON path."""
 
     if path is None:
+        logger.info("Using default controller config")
         return ControllerConfig()
 
     with path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
     if not isinstance(payload, dict):
         raise ValueError("Controller config must be a JSON object.")
-    return _parse_controller_payload(payload)
+    config = _parse_controller_payload(payload)
+    logger.info("Loaded controller config from %s", path)
+    logger.debug("Controller config payload: %s", payload)
+    return config
 
 
 def _parse_redirect_policy_config(
@@ -289,12 +295,28 @@ class LatencyTrackerWorker:
         self.redirect_decisions = 0
         self.redirected_requests = 0
         self._next_forward_worker = 0
+        logger.info(
+            "LatencyTrackerWorker initialized worker_id=%d redirect_policy=%s",
+            self.tracker_worker_id,
+            self.redirect_policy_name,
+        )
+        logger.debug(
+            "LatencyTrackerWorker params rate=%s forward_mode=%s ewma_gamma=%.4f",
+            self.redirect_rate,
+            self.forward_mode,
+            self.ewma_gamma,
+        )
 
     def should_redirect(self, request: Request) -> bool:
         self.redirect_decisions += 1
         selected = self.redirect_policy.should_redirect(request, self.rng)
         if selected:
             self.redirected_requests += 1
+        logger.debug(
+            "Redirect decision rid=%d selected=%s",
+            request.rid,
+            selected,
+        )
         return selected
 
     def pick_forward_worker(
@@ -308,9 +330,14 @@ class LatencyTrackerWorker:
                 raise ValueError(
                     "selected_worker_id is required for selected_worker forward mode."
                 )
+            logger.debug(
+                "Forward mode selected_worker -> worker=%d",
+                selected_worker_id,
+            )
             return selected_worker_id
         worker_id = self._next_forward_worker
         self._next_forward_worker = (self._next_forward_worker + 1) % self.num_workers
+        logger.debug("Forward mode round_robin -> worker=%d", worker_id)
         return worker_id
 
     def observe(self, worker_id: int, latency: float) -> None:
@@ -320,6 +347,13 @@ class LatencyTrackerWorker:
         self.estimates[worker_id] = max(1e-9, estimate)
         self.sample_counts[worker_id] += 1
         self.sampled_requests += 1
+        logger.debug(
+            "Latency observed worker=%d latency=%.4f estimate=%.4f samples=%d",
+            worker_id,
+            latency,
+            self.estimates[worker_id],
+            self.sample_counts[worker_id],
+        )
 
 
 class LoadBalancerController:
@@ -360,6 +394,11 @@ class LoadBalancerController:
             )
         else:
             self.latency_tracker = None
+        logger.info(
+            "LoadBalancerController initialized policy=%s tracker_enabled=%s",
+            self.policy,
+            self.latency_tracker_enabled,
+        )
 
     def initialize(self, lb: "LoadBalancer") -> None:
         if self.latency_tracker is not None:
@@ -372,6 +411,7 @@ class LoadBalancerController:
 
         if self.config.wrr.weights is not None:
             lb.set_worker_weights(self.config.wrr.weights)
+        logger.info("Controller initialized into load balancer")
 
     def is_latency_tracker_worker(self, worker_id: int) -> bool:
         return (
@@ -386,10 +426,16 @@ class LoadBalancerController:
     ) -> int:
         if self.latency_tracker is None:
             raise RuntimeError("Latency tracker is not enabled.")
-        return self.latency_tracker.pick_forward_worker(
+        worker_id = self.latency_tracker.pick_forward_worker(
             request,
             selected_worker_id=selected_worker_id,
         )
+        logger.debug(
+            "Latency tracker forwarded rid=%d -> worker=%d",
+            request.rid,
+            worker_id,
+        )
+        return worker_id
 
     def _maybe_update_wrr_weights(self, lb: "LoadBalancer") -> None:
         if self.policy != "weighted_round_robin":
@@ -412,6 +458,7 @@ class LoadBalancerController:
             weight = min(max(weight, self.config.wrr.min_weight), self.config.wrr.max_weight)
             weights.append(weight)
         lb.set_worker_weights(weights)
+        logger.info("WRR inverse-latency weights updated")
 
     def on_request_complete(
         self,
@@ -421,7 +468,6 @@ class LoadBalancerController:
         latency_tracked: bool,
         lb: "LoadBalancer",
     ) -> None:
-        del request
         self.completion_count += 1
         if latency_tracked and self.latency_tracker is not None:
             self.latency_tracker.observe(worker_id, latency)
@@ -431,6 +477,13 @@ class LoadBalancerController:
                 self.latency_tracker.sample_counts[worker_id],
             )
             self._maybe_update_wrr_weights(lb)
+        logger.debug(
+            "Completion processed rid=%d worker=%d tracked=%s latency=%.4f",
+            request.rid,
+            worker_id,
+            latency_tracked,
+            latency,
+        )
 
     def summarize(self, lb: "LoadBalancer") -> Dict[str, object]:
         summary: Dict[str, object] = {
@@ -472,4 +525,5 @@ class LoadBalancerController:
             summary["latency_samples_by_worker"] = []
             summary["latency_estimate_by_worker"] = []
 
+        logger.info("Controller summary generated")
         return summary

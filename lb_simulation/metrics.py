@@ -1,9 +1,12 @@
 """Metrics collection and summary reporting."""
 
+import logging
 import statistics
 from typing import Dict, List
 
 from .utils import percentile
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsCollector:
@@ -17,11 +20,17 @@ class MetricsCollector:
         self.global_inflight_samples: List[int] = []
         self.dispatch_count = 0
         self.completion_count = 0
+        logger.info("MetricsCollector initialized for %d workers", num_workers)
 
     def record_dispatch(self, queue_len: int, global_inflight: int) -> None:
         self.dispatch_count += 1
         self.queue_samples.append(queue_len)
         self.global_inflight_samples.append(global_inflight)
+        logger.debug(
+            "Dispatch metric recorded queue_len=%d global_inflight=%d",
+            queue_len,
+            global_inflight,
+        )
 
     def record_completion(
         self,
@@ -34,6 +43,12 @@ class MetricsCollector:
         self.latencies.append(latency)
         self.worker_busy_time[worker_id] += service_time
         self.latencies_by_class.setdefault(class_id, []).append(latency)
+        logger.debug(
+            "Completion metric recorded worker=%d class=%d latency=%.4f",
+            worker_id,
+            class_id,
+            latency,
+        )
 
     def summarize(self, sim_time: float, active_time: float) -> Dict[str, object]:
         """Return aggregate metrics for the full simulation run."""
@@ -54,6 +69,12 @@ class MetricsCollector:
             }
             for class_id, values in sorted(self.latencies_by_class.items())
         }
+        logger.info(
+            "Summarized metrics dispatched=%d completed=%d mean_latency=%.4f",
+            self.dispatch_count,
+            self.completion_count,
+            mean_latency,
+        )
 
         return {
             "dispatched": self.dispatch_count,
