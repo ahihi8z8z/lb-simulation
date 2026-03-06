@@ -291,17 +291,25 @@ Ví dụ:
     }
   },
   "wrr": {
-    "mode": "inverse_latency",
+    "mode": "lp_latency",
     "update_every_samples": 20,
     "inverse_power": 1.0,
     "min_weight": 0.2,
-    "max_weight": 5.0
+    "max_weight": 5.0,
+    "lp_balance_tolerance": 0.25,
+    "lp_ewma_gamma": 0.1,
+    "lp_weight_ema_decay": 0.2,
+    "lp_use_tracked_only": false
   }
 }
 ```
 
 Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
+- `wrr.mode` hỗ trợ: `none`, `inverse_latency`, `lp_latency`.
+- `wrr.mode = lp_latency`: controller ước lượng latency theo `class_id x worker`, giải bài toán LP để phân bổ tải theo class, rồi chuyển thành `worker_weights` cho `weighted_round_robin`.
+- `wrr.mode = lp_latency` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
+- `wrr.lp_balance_tolerance` điều khiển biên độ cân bằng tải mỗi worker quanh mức trung bình.
 - `latency_tracker.ewma_gamma` là hệ số EWMA để ước lượng latency từ sample.
 - `latency_tracker.redirect_policy` hiện có:
   - `fixed_rate`: redirect theo tỉ lệ `rate`, tracker forward theo round-robin.

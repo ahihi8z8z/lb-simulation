@@ -12,10 +12,14 @@
     }
   },
   "wrr": {
-    "mode": "inverse_latency",
+    "mode": "lp_latency",
     "update_every_samples": 20,
     "inverse_power": 1.0,
     "min_weight": 0.2,
-    "max_weight": 5.0
+    "max_weight": 5.0,
+    "lp_balance_tolerance": 0.25,
+    "lp_ewma_gamma": 0.1,
+    "lp_weight_ema_decay": 0.2,
+    "lp_use_tracked_only": false
   }
 }

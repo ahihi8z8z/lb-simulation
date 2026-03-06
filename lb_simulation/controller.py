@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import random
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from scipy.optimize import linprog
 
 from .latency_redirect_policies import create_latency_redirect_policy
 from .models import Request
@@ -46,6 +49,10 @@ class WrrControlConfig:
     inverse_power: float = 1.0
     min_weight: float = 0.1
     max_weight: float = 10.0
+    lp_balance_tolerance: float = 0.25
+    lp_ewma_gamma: float = 0.10
+    lp_weight_ema_decay: float = 0.0
+    lp_use_tracked_only: bool = False
 
 
 @dataclass
@@ -87,6 +94,11 @@ def _to_bool_optional(raw: object, key: str, default: Optional[bool]) -> Optiona
         if lowered in {"false", "0", "no", "off"}:
             return False
     raise ValueError(f"Invalid bool value for {key}: {raw}")
+
+
+def _to_bool(raw: object, key: str, default: bool) -> bool:
+    value = _to_bool_optional(raw, key, None)
+    return default if value is None else value
 
 
 def _parse_controller_payload(
@@ -173,12 +185,47 @@ def _parse_controller_payload(
                 10.0,
             ),
         ),
+        lp_balance_tolerance=max(
+            0.0,
+            _to_float(
+                wrr_cfg_dict.get("lp_balance_tolerance"),
+                "wrr.lp_balance_tolerance",
+                0.25,
+            ),
+        ),
+        lp_ewma_gamma=max(
+            0.0,
+            min(
+                1.0,
+                _to_float(
+                    wrr_cfg_dict.get("lp_ewma_gamma"),
+                    "wrr.lp_ewma_gamma",
+                    0.10,
+                ),
+            ),
+        ),
+        lp_weight_ema_decay=max(
+            0.0,
+            min(
+                0.999999,
+                _to_float(
+                    wrr_cfg_dict.get("lp_weight_ema_decay"),
+                    "wrr.lp_weight_ema_decay",
+                    0.0,
+                ),
+            ),
+        ),
+        lp_use_tracked_only=_to_bool(
+            wrr_cfg_dict.get("lp_use_tracked_only"),
+            "wrr.lp_use_tracked_only",
+            False,
+        ),
     )
 
     if wrr_cfg.max_weight < wrr_cfg.min_weight:
         raise ValueError("wrr.max_weight must be >= wrr.min_weight.")
-    if wrr_cfg.mode not in {"none", "inverse_latency"}:
-        raise ValueError("wrr.mode must be one of: none, inverse_latency.")
+    if wrr_cfg.mode not in {"none", "inverse_latency", "lp_latency"}:
+        raise ValueError("wrr.mode must be one of: none, inverse_latency, lp_latency.")
 
     return ControllerConfig(
         mode=str(payload.get("mode", "none")).strip().lower() or "none",
@@ -373,6 +420,13 @@ class LoadBalancerController:
         self.rng = rng or random.Random()
         self.control_mode = config.mode
         self.completion_count = 0
+        self._wrr_lp_class_latency_estimates: Dict[int, List[float]] = {}
+        self._wrr_lp_class_latency_samples: Dict[int, List[int]] = {}
+        self._wrr_lp_class_completions_window: Dict[int, int] = defaultdict(int)
+        self._wrr_lp_updates = 0
+        self._wrr_lp_last_weights: Optional[List[float]] = None
+        self._wrr_lp_latency_sampled_total = 0
+        self._wrr_inverse_last_update_sampled_requests = -1
 
         requested = config.latency_tracker.enabled
         if requested is None:
@@ -440,11 +494,22 @@ class LoadBalancerController:
     def _maybe_update_wrr_weights(self, lb: "LoadBalancer") -> None:
         if self.policy != "weighted_round_robin":
             return
-        if self.config.wrr.mode != "inverse_latency":
+        if self.config.wrr.mode == "inverse_latency":
+            self._maybe_update_wrr_weights_inverse_latency(lb)
             return
+        if self.config.wrr.mode == "lp_latency":
+            self._maybe_update_wrr_weights_lp_latency(lb)
+            return
+
+    def _maybe_update_wrr_weights_inverse_latency(self, lb: "LoadBalancer") -> None:
         if self.latency_tracker is None:
             return
         if self.latency_tracker.sampled_requests <= 0:
+            return
+        if (
+            self.latency_tracker.sampled_requests
+            == self._wrr_inverse_last_update_sampled_requests
+        ):
             return
         if (
             self.latency_tracker.sampled_requests % self.config.wrr.update_every_samples
@@ -458,7 +523,173 @@ class LoadBalancerController:
             weight = min(max(weight, self.config.wrr.min_weight), self.config.wrr.max_weight)
             weights.append(weight)
         lb.set_worker_weights(weights)
+        self._wrr_inverse_last_update_sampled_requests = self.latency_tracker.sampled_requests
         logger.info("WRR inverse-latency weights updated")
+
+    def _record_wrr_lp_observation(
+        self,
+        request: Request,
+        worker_id: int,
+        latency: float,
+        latency_tracked: bool,
+    ) -> None:
+        if self.policy != "weighted_round_robin":
+            return
+        if self.config.wrr.mode != "lp_latency":
+            return
+
+        class_id = int(request.class_id)
+        self._wrr_lp_class_completions_window[class_id] += 1
+
+        if self.config.wrr.lp_use_tracked_only and not latency_tracked:
+            return
+
+        estimates = self._wrr_lp_class_latency_estimates.get(class_id)
+        if estimates is None:
+            estimates = [self.config.latency_tracker.init_estimate for _ in range(self.num_workers)]
+            self._wrr_lp_class_latency_estimates[class_id] = estimates
+        samples = self._wrr_lp_class_latency_samples.get(class_id)
+        if samples is None:
+            samples = [0 for _ in range(self.num_workers)]
+            self._wrr_lp_class_latency_samples[class_id] = samples
+
+        previous = estimates[worker_id]
+        gamma = self.config.wrr.lp_ewma_gamma
+        estimates[worker_id] = max(1e-9, (1.0 - gamma) * previous + gamma * latency)
+        samples[worker_id] += 1
+        self._wrr_lp_latency_sampled_total += 1
+
+    def _normalize_wrr_weights(self, worker_loads: Sequence[float]) -> List[float]:
+        total = sum(max(0.0, float(value)) for value in worker_loads)
+        if total <= 0:
+            candidate = [1.0 for _ in range(self.num_workers)]
+        else:
+            candidate = [
+                max(1e-9, (max(0.0, float(value)) / total) * self.num_workers)
+                for value in worker_loads
+            ]
+
+        clipped = [
+            min(max(value, self.config.wrr.min_weight), self.config.wrr.max_weight)
+            for value in candidate
+        ]
+        decay = self.config.wrr.lp_weight_ema_decay
+        if (decay > 0.0) and (self._wrr_lp_last_weights is not None):
+            clipped = [
+                decay * self._wrr_lp_last_weights[idx] + (1.0 - decay) * clipped[idx]
+                for idx in range(self.num_workers)
+            ]
+        return clipped
+
+    def _solve_wrr_lp(
+        self,
+        demand_by_class: Sequence[Tuple[int, float]],
+        cost_by_class: Sequence[Sequence[float]],
+    ) -> List[float]:
+        service_count = len(demand_by_class)
+        worker_count = self.num_workers
+        if (service_count <= 0) or (worker_count <= 0):
+            return [0.0 for _ in range(worker_count)]
+
+        c: List[float] = []
+        for class_idx in range(service_count):
+            demand = demand_by_class[class_idx][1]
+            for worker_idx in range(worker_count):
+                c.append(demand * max(1e-9, float(cost_by_class[class_idx][worker_idx])))
+
+        variable_count = service_count * worker_count
+        a_eq = [[0.0 for _ in range(variable_count)] for _ in range(service_count)]
+        for class_idx in range(service_count):
+            base = class_idx * worker_count
+            for worker_idx in range(worker_count):
+                a_eq[class_idx][base + worker_idx] = 1.0
+        b_eq = [1.0 for _ in range(service_count)]
+
+        total_demand = sum(demand for _, demand in demand_by_class)
+        target = total_demand / worker_count
+        epsilon = self.config.wrr.lp_balance_tolerance * target
+        lower = max(0.0, target - epsilon)
+        upper = target + epsilon
+
+        a_ub: List[List[float]] = []
+        b_ub: List[float] = []
+        for worker_idx in range(worker_count):
+            row = [0.0 for _ in range(variable_count)]
+            for class_idx in range(service_count):
+                row[class_idx * worker_count + worker_idx] = demand_by_class[class_idx][1]
+            a_ub.append(row)
+            b_ub.append(upper)
+            a_ub.append([-value for value in row])
+            b_ub.append(-lower)
+
+        result = linprog(
+            c=c,
+            A_eq=a_eq,
+            b_eq=b_eq,
+            A_ub=a_ub,
+            b_ub=b_ub,
+            bounds=[(0.0, 1.0) for _ in range(variable_count)],
+            method="highs",
+        )
+        if (not result.success) or (result.x is None):
+            raise RuntimeError(
+                "LP solve failed for WRR lp_latency mode. "
+                f"status={result.status}, message={result.message}"
+            )
+
+        worker_loads = [0.0 for _ in range(worker_count)]
+        for class_idx in range(service_count):
+            demand = demand_by_class[class_idx][1]
+            for worker_idx in range(worker_count):
+                value = float(result.x[class_idx * worker_count + worker_idx])
+                worker_loads[worker_idx] += demand * max(0.0, value)
+        return worker_loads
+
+    def _maybe_update_wrr_weights_lp_latency(self, lb: "LoadBalancer") -> None:
+        if self.completion_count <= 0:
+            return
+        if self.completion_count % self.config.wrr.update_every_samples != 0:
+            return
+        if not self._wrr_lp_class_completions_window:
+            return
+        if self.config.wrr.lp_use_tracked_only and self._wrr_lp_latency_sampled_total <= 0:
+            return
+
+        demand_by_class = sorted(
+            (
+                (class_id, float(count))
+                for class_id, count in self._wrr_lp_class_completions_window.items()
+                if count > 0
+            ),
+            key=lambda item: item[0],
+        )
+        if not demand_by_class:
+            return
+
+        cost_by_class: List[List[float]] = []
+        for class_id, _ in demand_by_class:
+            estimates = self._wrr_lp_class_latency_estimates.get(class_id)
+            if estimates is None:
+                estimates = [max(1e-9, value) for value in lb.lat_ewma]
+            row = [max(1e-9, float(value)) for value in estimates[: self.num_workers]]
+            if len(row) < self.num_workers:
+                row.extend([max(1e-9, value) for value in lb.lat_ewma[len(row) :]])
+            cost_by_class.append(row)
+
+        worker_loads = self._solve_wrr_lp(
+            demand_by_class=demand_by_class,
+            cost_by_class=cost_by_class,
+        )
+
+        weights = self._normalize_wrr_weights(worker_loads)
+        lb.set_worker_weights(weights)
+        self._wrr_lp_last_weights = list(weights)
+        self._wrr_lp_updates += 1
+        self._wrr_lp_class_completions_window.clear()
+        logger.info(
+            "WRR LP-latency weights updated solver=scipy_linprog classes=%d",
+            len(demand_by_class),
+        )
 
     def on_request_complete(
         self,
@@ -469,6 +700,12 @@ class LoadBalancerController:
         lb: "LoadBalancer",
     ) -> None:
         self.completion_count += 1
+        self._record_wrr_lp_observation(
+            request=request,
+            worker_id=worker_id,
+            latency=latency,
+            latency_tracked=latency_tracked,
+        )
         if latency_tracked and self.latency_tracker is not None:
             self.latency_tracker.observe(worker_id, latency)
             lb.set_latency_estimate(
@@ -476,7 +713,7 @@ class LoadBalancerController:
                 self.latency_tracker.estimates[worker_id],
                 self.latency_tracker.sample_counts[worker_id],
             )
-            self._maybe_update_wrr_weights(lb)
+        self._maybe_update_wrr_weights(lb)
         logger.debug(
             "Completion processed rid=%d worker=%d tracked=%s latency=%.4f",
             request.rid,
@@ -492,6 +729,9 @@ class LoadBalancerController:
             "completions_seen": self.completion_count,
             "wrr_control_mode": self.config.wrr.mode,
             "wrr_weights": [float(value) for value in lb.worker_weights],
+            "wrr_lp_solver": "scipy_linprog",
+            "wrr_lp_updates": self._wrr_lp_updates,
+            "wrr_lp_sampled_observations": self._wrr_lp_latency_sampled_total,
             "latency_tracker_enabled": self.latency_tracker is not None,
         }
 
