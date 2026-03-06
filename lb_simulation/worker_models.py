@@ -150,7 +150,7 @@ class FixedServiceTimeModel(WorkerServiceModel):
     
 @register_worker_model
 class FixedLinearServiceTimeModel(WorkerServiceModel):
-    """S = clip(1 / (a + b * job_size), min, max)."""
+    """S = 1 / clip(a + b * job_size, min, max)."""
 
     name = "fixed_linear"
 
@@ -165,5 +165,6 @@ class FixedLinearServiceTimeModel(WorkerServiceModel):
 
     def sample_service_time(self, context: ServiceTimeContext, rng: random.Random) -> float:
         del rng
-        service_time = 1.0 / (self.a + self.b * context.job_size)
-        return min(self.max_s, max(self.min_s, service_time))
+        denominator = self.a + self.b * context.job_size
+        denominator = min(self.max_s, max(self.min_s, denominator))
+        return 1.0 / denominator

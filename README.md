@@ -238,6 +238,7 @@ Service models built-in:
 - `contention_lognormal`: `S = (a+b*z)*(1+c*n_local)*(1+d*max(0,N-n0))*LogNormal(0,sigma)`
 - `linear_lognormal`: `S = (a+b*z)*LogNormal(0,sigma)`
 - `fixed`: `S = service_time` (hằng số)
+- `fixed_linear`: mô hình throughput thay đổi tuyến tính theo `job_size` (service time được suy ra từ throughput này).
 
 Ví dụ:
 ```json
