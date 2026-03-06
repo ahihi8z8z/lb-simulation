@@ -3,6 +3,7 @@
 import argparse
 import json
 import random
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,10 @@ import simpy
 
 from .controller import LoadBalancerController, load_controller_config
 from .inference_pool import InferencePool
-from .load_balancer import LoadBalancer, supported_policies
+from .load_balancer import (
+    LoadBalancer,
+    supported_policies,
+)
 from .metrics import MetricsCollector
 from .models import Request
 from .request_csv_logger import RequestCsvLogger
@@ -21,6 +25,44 @@ from .traffic import (
     load_service_class_config,
 )
 from .workers import expand_worker_specs, load_worker_class_config
+
+
+_DURATION_PATTERN = re.compile(
+    r"^\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>[smhdSMHD]?)\s*$"
+)
+
+
+def parse_duration_seconds(raw: str) -> float:
+    """
+    Parse duration text to seconds.
+
+    Supported examples:
+    - "300" (seconds)
+    - "90s"
+    - "1m"
+    - "2h"
+    - "3d"
+    """
+
+    match = _DURATION_PATTERN.match(str(raw))
+    if not match:
+        raise ValueError(
+            f"Invalid --t-end value: {raw}. Supported forms: 300, 90s, 1m, 2h, 3d."
+        )
+
+    value = float(match.group("value"))
+    unit = match.group("unit").lower()
+    multiplier = {
+        "": 1.0,
+        "s": 1.0,
+        "m": 60.0,
+        "h": 3600.0,
+        "d": 86400.0,
+    }[unit]
+    seconds = value * multiplier
+    if seconds <= 0:
+        raise ValueError("--t-end must be > 0.")
+    return seconds
 
 
 def _create_run_dir(logs_root: Path) -> Path:
@@ -49,7 +91,6 @@ def run_simulation(
     service_class_config: Optional[Path] = None,
     worker_class_config: Optional[Path] = None,
     controller_config: Optional[Path] = None,
-    ewma_gamma: float = 0.10,
     seed: int = 42,
     full_log: bool = False,
     logs_root: Path = Path("logs"),
@@ -72,10 +113,7 @@ def run_simulation(
     effective_worker_classes = len(worker_class_specs)
     worker_specs = expand_worker_specs(worker_class_specs)
     num_workers = len(worker_specs)
-    controller_cfg = load_controller_config(
-        controller_config,
-        default_latency_gamma=ewma_gamma,
-    )
+    controller_cfg = load_controller_config(controller_config)
 
     run_dir = _create_run_dir(logs_root)
     service_config_snapshot_path = run_dir / "service_class_config.json"
@@ -95,7 +133,6 @@ def run_simulation(
                 str(controller_config_snapshot_path) if controller_config_snapshot_path else ""
             ),
             "controller_mode": controller_cfg.mode,
-            "ewma_gamma": ewma_gamma,
             "full_log": full_log,
             "policy": policy,
             "seed": seed,
@@ -121,7 +158,6 @@ def run_simulation(
     load_balancer = LoadBalancer(
         num_workers=num_workers,
         policy=policy,
-        ewma_gamma=ewma_gamma,
         rng=rng,
     )
     controller = LoadBalancerController(
@@ -238,7 +274,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="Event-driven latency-only LB simulator (SimPy)")
     policy_choices = supported_policies()
-    parser.add_argument("--t-end", type=float, default=3600.0, help="Simulation horizon in seconds")
+    parser.add_argument(
+        "--t-end",
+        type=str,
+        default="1h",
+        help="Simulation horizon: seconds or duration suffix (e.g. 300, 90s, 1m, 2h, 3d)",
+    )
     parser.add_argument(
         "--policy",
         type=str,
@@ -264,7 +305,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional JSON config for controller (weight control / latency tracker tuning).",
     )
-    parser.add_argument("--ewma-gamma", type=float, default=0.10, help="EWMA smoothing factor")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
         "--full-log",
@@ -328,13 +368,16 @@ def main() -> None:
     """CLI main function."""
 
     args = build_arg_parser().parse_args()
+    try:
+        t_end_seconds = parse_duration_seconds(args.t_end)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     summary = run_simulation(
-        t_end=args.t_end,
+        t_end=t_end_seconds,
         policy=args.policy,
         service_class_config=args.service_class_config,
         worker_class_config=args.worker_class_config,
         controller_config=args.controller_config,
-        ewma_gamma=args.ewma_gamma,
         seed=args.seed,
         full_log=args.full_log,
     )

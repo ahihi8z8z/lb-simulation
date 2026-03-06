@@ -3,8 +3,8 @@
   "latency_tracker": {
     "enabled": true,
     "sample_rate": 0.05,
-    "ewma_gamma": 0.1,
-    "init_estimate": 0.5
+    "init_estimate": 0.5,
+    "ewma_gamma": 0.1
   },
   "wrr": {
     "mode": "inverse_latency",

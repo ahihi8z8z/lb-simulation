@@ -65,7 +65,7 @@ python3 simulator.py \
 python3 simulator.py \
   --service-class-config configs/service_classes.example.json \
   --worker-class-config configs/worker_classes_heterogeneous.example.json \
-  --t-end 1800 \
+  --t-end 2h \
   --policy latency_only
 ```
 
@@ -84,6 +84,8 @@ Mỗi policy được module hóa trong `lb_simulation/lb_policies.py` qua cơ c
 3. Đặt `name` duy nhất
 
 CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
+
+`--t-end` hỗ trợ cả đơn vị thời gian: `300`, `90s`, `1m`, `2h`, `3d`.
 
 ## 🎛️ Controller
 `Controller` là module riêng để:
@@ -126,7 +128,7 @@ python3 simulator.py \
   --worker-class-config configs/worker_classes.example.json \
   --controller-config configs/controller_wrr_inverse.example.json \
   --policy weighted_round_robin \
-  --t-end 1800
+  --t-end 30m
 ```
 
 Hoặc chạy không controller config (mặc định no-op):
@@ -249,8 +251,8 @@ Ví dụ:
   "latency_tracker": {
     "enabled": true,
     "sample_rate": 0.05,
-    "ewma_gamma": 0.1,
-    "init_estimate": 0.5
+    "init_estimate": 0.5,
+    "ewma_gamma": 0.1
   },
   "wrr": {
     "mode": "inverse_latency",
@@ -264,6 +266,7 @@ Ví dụ:
 
 Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
+- `latency_tracker.ewma_gamma` là hệ số EWMA để ước lượng latency từ sample.
 
 ## 🧪 Dev quick check
 ```bash

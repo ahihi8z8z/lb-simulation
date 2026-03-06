@@ -19,8 +19,8 @@ class LatencyTrackerConfig:
 
     enabled: Optional[bool] = None
     sample_rate: float = 0.05
-    ewma_gamma: float = 0.10
     init_estimate: float = 0.5
+    ewma_gamma: float = 0.10
 
 
 @dataclass
@@ -78,7 +78,6 @@ def _to_bool_optional(raw: object, key: str, default: Optional[bool]) -> Optiona
 
 def _parse_controller_payload(
     payload: Dict[str, object],
-    default_latency_gamma: float,
 ) -> ControllerConfig:
     latency_cfg_raw = payload.get("latency_tracker")
     latency_cfg_dict = latency_cfg_raw if isinstance(latency_cfg_raw, dict) else {}
@@ -97,6 +96,14 @@ def _parse_controller_payload(
                 ),
             ),
         ),
+        init_estimate=max(
+            1e-9,
+            _to_float(
+                latency_cfg_dict.get("init_estimate"),
+                "latency_tracker.init_estimate",
+                0.5,
+            ),
+        ),
         ewma_gamma=max(
             0.0,
             min(
@@ -104,16 +111,8 @@ def _parse_controller_payload(
                 _to_float(
                     latency_cfg_dict.get("ewma_gamma"),
                     "latency_tracker.ewma_gamma",
-                    default_latency_gamma,
+                    0.10,
                 ),
-            ),
-        ),
-        init_estimate=max(
-            1e-9,
-            _to_float(
-                latency_cfg_dict.get("init_estimate"),
-                "latency_tracker.init_estimate",
-                0.5,
             ),
         ),
     )
@@ -183,28 +182,30 @@ def _parse_controller_payload(
 
 def load_controller_config(
     path: Optional[Path],
-    default_latency_gamma: float = 0.10,
 ) -> ControllerConfig:
     """Load controller config from optional JSON path."""
 
     if path is None:
-        return ControllerConfig(
-            latency_tracker=LatencyTrackerConfig(ewma_gamma=default_latency_gamma)
-        )
+        return ControllerConfig()
 
     with path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
     if not isinstance(payload, dict):
         raise ValueError("Controller config must be a JSON object.")
-    return _parse_controller_payload(payload, default_latency_gamma=default_latency_gamma)
+    return _parse_controller_payload(payload)
 
 
 class SampledLatencyTracker:
     """Track latency estimates from a sampled subset of request completions."""
 
-    def __init__(self, num_workers: int, config: LatencyTrackerConfig) -> None:
+    def __init__(
+        self,
+        num_workers: int,
+        config: LatencyTrackerConfig,
+        ewma_gamma: float,
+    ) -> None:
         self.sample_rate = config.sample_rate
-        self.ewma_gamma = config.ewma_gamma
+        self.ewma_gamma = max(0.0, min(1.0, float(ewma_gamma)))
         self.estimates: List[float] = [config.init_estimate for _ in range(num_workers)]
         self.sample_counts: List[int] = [0 for _ in range(num_workers)]
         self.sampled_requests = 0
@@ -254,6 +255,7 @@ class LoadBalancerController:
             self.latency_tracker = SampledLatencyTracker(
                 num_workers=num_workers,
                 config=config.latency_tracker,
+                ewma_gamma=config.latency_tracker.ewma_gamma,
             )
         else:
             self.latency_tracker = None
@@ -339,4 +341,3 @@ class LoadBalancerController:
             summary["latency_estimate_by_worker"] = []
 
         return summary
-

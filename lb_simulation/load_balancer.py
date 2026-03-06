@@ -14,7 +14,6 @@ class LoadBalancer:
         self,
         num_workers: int,
         policy: str = "latency_only",
-        ewma_gamma: float = 0.10,
         init_ewma: float = 0.5,
         explore_coef: float = 0.10,
         epsilon: float = 0.03,
@@ -22,7 +21,6 @@ class LoadBalancer:
     ) -> None:
         self.num_workers = num_workers
         self.policy = policy.strip().lower()
-        self.ewma_gamma = ewma_gamma
         self.explore_coef = explore_coef
         self.epsilon = epsilon
         self.rng = rng or random.Random()
