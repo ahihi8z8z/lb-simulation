@@ -147,3 +147,23 @@ class FixedServiceTimeModel(WorkerServiceModel):
     def sample_service_time(self, context: ServiceTimeContext, rng: random.Random) -> float:
         del context, rng
         return self.service_time
+    
+@register_worker_model
+class FixedLinearServiceTimeModel(WorkerServiceModel):
+    """S = clip(1 / (a + b * job_size), min, max)."""
+
+    name = "fixed_linear"
+
+    def __init__(self, params: Mapping[str, Any], total_workers: int) -> None:
+        del total_workers
+        self.a = _as_float(params, "a", 0.03)
+        self.b = _as_float(params, "b", 0.002)
+        self.min_s = _as_float(params, "min", 1e-9)
+        self.max_s = _as_float(params, "max", float("inf"))
+        if self.min_s <= 0:
+            raise ValueError("fixed_linear.min must be > 0.")
+
+    def sample_service_time(self, context: ServiceTimeContext, rng: random.Random) -> float:
+        del rng
+        service_time = 1.0 / (self.a + self.b * context.job_size)
+        return min(self.max_s, max(self.min_s, service_time))
