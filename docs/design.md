@@ -25,7 +25,7 @@
 ## Ràng buộc và validate
 - `wrr.mode=lp_latency` chỉ dùng với `weighted_round_robin`.
 - `lp_latency` bắt buộc bật `latency_tracker.enabled=true`.
-- Không có failback heuristic cho LP: nếu `linprog` fail thì raise lỗi runtime.
+- Không có fallback heuristic cho LP: nếu `linprog` fail thì raise lỗi runtime.
 - Weight input/output luôn hợp lệ:
   - mỗi phần tử > 0.
   - khi apply vào LB luôn được normalize tổng = `1.0`.

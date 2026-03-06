@@ -27,7 +27,8 @@ sequenceDiagram
     participant IP as InferencePool
     TG->>LB: choose_worker(request)
     LB->>LB: should_redirect? yes
-    LB->>C: selected tracker_worker_id
+    LB->>LB: consume_redirect_target(rid) -> selected_worker_id
+    LB->>C: forward_via_latency_tracker(request, selected_worker_id)
     C->>LT: pick_forward_worker(...)
     C->>IP: dispatch(forwarded_worker, tracked=true)
     IP->>LB: on_complete(real_worker + tracker_worker)

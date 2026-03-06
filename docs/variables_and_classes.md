@@ -82,7 +82,7 @@
 ### `controller.latency_tracker`
 | Key | Kiểu | Tác dụng |
 |---|---|---|
-| `enabled` | `bool` | Bật tracker worker và cơ chế redirect sampling. |
+| `enabled` | `Optional[bool]` | Cờ bật tracker worker; `None` nghĩa là không khai báo rõ trong config. |
 | `init_estimate` | `float` | Giá trị EWMA ban đầu cho mọi worker. |
 | `ewma_gamma` | `float` | Mức phản ứng của estimate theo sample mới. |
 | `redirect_policy` | `object` | Chọn chính sách sampling (`fixed_rate`, `track_all`, ...). |

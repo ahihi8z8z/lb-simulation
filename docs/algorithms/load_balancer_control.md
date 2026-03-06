@@ -35,6 +35,10 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
 2. Nếu `completion_time >= next_update_time`:
   - gọi `_maybe_update_weights`.
   - tăng `next_update_time += update_interval_seconds`.
+- Lưu ý bám theo code hiện tại:
+  - Khi `lp_use_tracked_only=true` và completion hiện tại là `latency_tracked=false`,
+    module `return` sớm ngay sau khi tăng `class_completions_window`.
+  - Nghĩa là check mốc thời gian update chỉ chạy ở completion được phép dùng để học latency.
 - Biến implement chính trong bước update:
   - `completion_time = request.t_arrival + latency`.
   - `self.params.lp_use_tracked_only` và `latency_tracked`: cờ lọc sample.
