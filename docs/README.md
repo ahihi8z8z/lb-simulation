@@ -8,6 +8,11 @@ Thư mục này gom toàn bộ tài liệu kiến trúc và thiết kế của s
 - `flow_diagrams.md`: các biểu đồ luồng chi tiết (runtime/control loop).
 - `design.md`: quyết định thiết kế, ràng buộc và nguyên tắc vận hành.
 - `variables_and_classes.md`: tác dụng các biến quan trọng và các class chính.
+- `queueing_model.md`: mô tả hệ thống dưới góc nhìn queueing model.
+- `algorithms/`: mô tả thuật toán theo 3 nhóm:
+  - load balancer
+  - service model
+  - load balancer control
 
 ## Phạm vi tài liệu
 - Tài liệu phản ánh code hiện tại trong `lb_simulation/`.

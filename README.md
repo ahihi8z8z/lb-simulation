@@ -13,10 +13,12 @@ Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu 
 ## 📚 Tài liệu
 - Tài liệu tổng hợp: `docs/README.md`
 - Tổng quan kiến trúc: `docs/architecture_overview.md`
+- Queueing model view: `docs/queueing_model.md`
 - Flow chart request: `docs/request_flow_chart.md`
 - Biểu đồ luồng chi tiết: `docs/flow_diagrams.md`
 - Design chi tiết: `docs/design.md`
 - Tác dụng biến và class: `docs/variables_and_classes.md`
+- Thuật toán theo nhóm: `docs/algorithms/README.md`
 
 ## 🚀 Cài đặt
 ```bash

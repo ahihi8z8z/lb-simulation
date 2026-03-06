@@ -36,3 +36,7 @@
   - `latency_tracker.enabled=true`.
   - có `scipy.optimize.linprog`.
 - Policy cần latency (`latency_only`) bắt buộc bật latency tracker qua `controller-config`.
+
+## Queueing model
+- Mô tả chi tiết dưới góc nhìn hàng đợi nằm trong `queueing_model.md`.
+- Ở mức kiến trúc: hệ thống là nhiều queue song song (`G/G/1` mỗi worker) với router động và vòng feedback từ controller.
