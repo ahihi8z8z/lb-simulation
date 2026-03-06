@@ -46,7 +46,6 @@ class WrrControlConfig:
     mode: str = "none"
     weights: Optional[List[float]] = None
     update_every_samples: int = 20
-    inverse_power: float = 1.0
     min_weight: float = 0.1
     max_weight: float = 10.0
     lp_balance_tolerance: float = 0.25
@@ -161,14 +160,6 @@ def _parse_controller_payload(
                 20,
             ),
         ),
-        inverse_power=max(
-            1e-9,
-            _to_float(
-                wrr_cfg_dict.get("inverse_power"),
-                "wrr.inverse_power",
-                1.0,
-            ),
-        ),
         min_weight=max(
             1e-9,
             _to_float(
@@ -224,8 +215,12 @@ def _parse_controller_payload(
 
     if wrr_cfg.max_weight < wrr_cfg.min_weight:
         raise ValueError("wrr.max_weight must be >= wrr.min_weight.")
-    if wrr_cfg.mode not in {"none", "inverse_latency", "lp_latency"}:
-        raise ValueError("wrr.mode must be one of: none, inverse_latency, lp_latency.")
+    if wrr_cfg.mode not in {"none", "lp_latency"}:
+        raise ValueError("wrr.mode must be one of: none, lp_latency.")
+    if wrr_cfg.mode == "lp_latency" and latency_cfg.enabled is not True:
+        raise ValueError(
+            "wrr.mode='lp_latency' requires latency_tracker.enabled=true in controller config."
+        )
 
     return ControllerConfig(
         mode=str(payload.get("mode", "none")).strip().lower() or "none",
@@ -426,16 +421,22 @@ class LoadBalancerController:
         self._wrr_lp_updates = 0
         self._wrr_lp_last_weights: Optional[List[float]] = None
         self._wrr_lp_latency_sampled_total = 0
-        self._wrr_inverse_last_update_sampled_requests = -1
 
         requested = config.latency_tracker.enabled
-        if requested is None:
-            requested = self.policy in LATENCY_AWARE_POLICIES
-        self.latency_tracker_enabled = requested
+        self.latency_tracker_enabled = bool(requested)
 
         if (self.policy in LATENCY_AWARE_POLICIES) and (not self.latency_tracker_enabled):
             raise ValueError(
-                f"Policy '{self.policy}' requires latency tracker in controller."
+                f"Policy '{self.policy}' requires latency_tracker.enabled=true in controller config."
+            )
+        if (
+            self.policy == "weighted_round_robin"
+            and self.config.wrr.mode == "lp_latency"
+            and (not self.latency_tracker_enabled)
+        ):
+            raise ValueError(
+                "Policy 'weighted_round_robin' with wrr.mode='lp_latency' requires "
+                "latency_tracker.enabled=true in controller config."
             )
 
         self.latency_tracker: Optional[LatencyTrackerWorker]
@@ -494,37 +495,9 @@ class LoadBalancerController:
     def _maybe_update_wrr_weights(self, lb: "LoadBalancer") -> None:
         if self.policy != "weighted_round_robin":
             return
-        if self.config.wrr.mode == "inverse_latency":
-            self._maybe_update_wrr_weights_inverse_latency(lb)
-            return
         if self.config.wrr.mode == "lp_latency":
             self._maybe_update_wrr_weights_lp_latency(lb)
             return
-
-    def _maybe_update_wrr_weights_inverse_latency(self, lb: "LoadBalancer") -> None:
-        if self.latency_tracker is None:
-            return
-        if self.latency_tracker.sampled_requests <= 0:
-            return
-        if (
-            self.latency_tracker.sampled_requests
-            == self._wrr_inverse_last_update_sampled_requests
-        ):
-            return
-        if (
-            self.latency_tracker.sampled_requests % self.config.wrr.update_every_samples
-            != 0
-        ):
-            return
-
-        weights: List[float] = []
-        for estimate in self.latency_tracker.estimates:
-            weight = (1.0 / max(1e-9, estimate)) ** self.config.wrr.inverse_power
-            weight = min(max(weight, self.config.wrr.min_weight), self.config.wrr.max_weight)
-            weights.append(weight)
-        lb.set_worker_weights(weights)
-        self._wrr_inverse_last_update_sampled_requests = self.latency_tracker.sampled_requests
-        logger.info("WRR inverse-latency weights updated")
 
     def _record_wrr_lp_observation(
         self,

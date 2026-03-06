@@ -14,7 +14,6 @@
   "wrr": {
     "mode": "lp_latency",
     "update_every_samples": 20,
-    "inverse_power": 1.0,
     "min_weight": 0.2,
     "max_weight": 5.0,
     "lp_balance_tolerance": 0.25,

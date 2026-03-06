@@ -101,10 +101,12 @@ CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
 
 Mặc định (không truyền `--controller-config`) controller ở chế độ no-op:
 - Không điều khiển tham số policy
+- Không có latency tracker
 
 Latency tracking đã tách khỏi Load Balancer:
 - LB không tự học latency từ toàn bộ completion.
-- Với policy cần latency (`peak_ewma`, `latency_only`), controller tự bật latency tracker.
+- Với policy cần latency (`peak_ewma`, `latency_only`) bắt buộc truyền `--controller-config` và set `latency_tracker.enabled=true`.
+- Với `weighted_round_robin` khi `wrr.mode = lp_latency`, cũng bắt buộc `latency_tracker.enabled=true`.
 - Latency tracker được mô hình như một worker đặc biệt: service time = 0, rồi forward request tới worker thật.
 - Controller gửi cho LB policy redirect để quyết định tỉ lệ request đi qua latency tracker.
 - Redirect policy có thể điều khiển cách forward (`round_robin` hoặc forward về đúng worker LB đã chọn).
@@ -274,6 +276,7 @@ Ghi chú:
 
 ## 🧩 Controller config (JSON)
 `--controller-config` là option optional.
+Nhưng với policy cần latency thì đây là option bắt buộc.
 
 Ví dụ:
 ```json
@@ -293,7 +296,6 @@ Ví dụ:
   "wrr": {
     "mode": "lp_latency",
     "update_every_samples": 20,
-    "inverse_power": 1.0,
     "min_weight": 0.2,
     "max_weight": 5.0,
     "lp_balance_tolerance": 0.25,
@@ -306,9 +308,10 @@ Ví dụ:
 
 Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
-- `wrr.mode` hỗ trợ: `none`, `inverse_latency`, `lp_latency`.
+- `wrr.mode` hỗ trợ: `none`, `lp_latency`.
 - `wrr.mode = lp_latency`: controller ước lượng latency theo `class_id x worker`, giải bài toán LP để phân bổ tải theo class, rồi chuyển thành `worker_weights` cho `weighted_round_robin`.
 - `wrr.mode = lp_latency` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
+- `wrr.mode = lp_latency` bắt buộc cần `latency_tracker.enabled=true`.
 - `wrr.lp_balance_tolerance` điều khiển biên độ cân bằng tải mỗi worker quanh mức trung bình.
 - `latency_tracker.ewma_gamma` là hệ số EWMA để ước lượng latency từ sample.
 - `latency_tracker.redirect_policy` hiện có:

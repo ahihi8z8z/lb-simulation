@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 import simpy
 
-from .controller import LoadBalancerController, load_controller_config
+from .controller import LATENCY_AWARE_POLICIES, LoadBalancerController, load_controller_config
 from .inference_pool import InferencePool
 from .logging_utils import configure_logging, normalize_log_mode
 from .load_balancer import (
@@ -108,6 +108,12 @@ def run_simulation(
         raise ValueError("service_class_config is required.")
     if worker_class_config is None:
         raise ValueError("worker_class_config is required.")
+    normalized_policy = policy.strip().lower()
+    if (normalized_policy in LATENCY_AWARE_POLICIES) and (controller_config is None):
+        raise ValueError(
+            f"Policy '{normalized_policy}' requires --controller-config with "
+            "latency_tracker.enabled=true."
+        )
 
     run_dir = _create_run_dir(logs_root)
     runtime_log_path = configure_logging(run_dir, mode=logger_mode)
@@ -144,7 +150,7 @@ def run_simulation(
     num_workers = len(worker_specs)
     controller_cfg = load_controller_config(controller_config)
     controller = LoadBalancerController(
-        policy=policy,
+        policy=normalized_policy,
         num_workers=num_workers,
         config=controller_cfg,
         rng=random.Random(rng.randrange(1, 2**31)),
@@ -203,7 +209,7 @@ def run_simulation(
 
     load_balancer = LoadBalancer(
         num_workers=num_workers,
-        policy=policy,
+        policy=normalized_policy,
         rng=rng,
     )
     controller.initialize(load_balancer)
@@ -329,7 +335,7 @@ def run_simulation(
     summary["wall_time_total"] = time.perf_counter() - wall_clock_start
     summary["sim_time_total"] = env.now
     summary["drain_time"] = max(0.0, env.now - t_end)
-    summary["policy"] = policy
+    summary["policy"] = normalized_policy
     summary["workers"] = num_workers
     summary["lb_workers"] = num_workers + (1 if controller.latency_tracker_enabled else 0)
     summary["worker_classes"] = effective_worker_classes
@@ -399,7 +405,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--controller-config",
         type=Path,
         default=None,
-        help="Optional JSON config for controller (weight control / latency tracker tuning).",
+        help=(
+            "JSON config for controller (weight control / latency tracker tuning). "
+            "Required for latency-aware policies."
+        ),
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
