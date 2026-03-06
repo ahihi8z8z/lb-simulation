@@ -22,6 +22,8 @@ lb_simulation/
   utils.py
   metrics.py
   controller.py
+  latency_tracker.py
+  lb_control_modules.py
   logging_utils.py
   latency_redirect_policies.py
   load_balancer.py
@@ -98,6 +100,11 @@ CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
 `Controller` là module riêng để:
 - Điều khiển tham số policy (ví dụ: `worker_weights` của `weighted_round_robin`)
 - Theo dõi latency theo kiểu sampling một phần traffic
+
+Kiến trúc controller hiện tại tách thành 2 module:
+- `latency_tracker` module: sampling và EWMA latency.
+- `load_balancer_control` module: điều khiển tham số LB theo policy-control logic.
+  - Hiện có module `none` (no-op) và `wrr_lp_latency`.
 
 Mặc định (không truyền `--controller-config`) controller ở chế độ no-op:
 - Không điều khiển tham số policy
@@ -308,8 +315,9 @@ Ví dụ:
 
 Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
+- `wrr.weights` luôn được chuẩn hóa để tổng bằng `1.0` khi apply vào Load Balancer.
 - `wrr.mode` hỗ trợ: `none`, `lp_latency`.
-- `wrr.mode = lp_latency`: controller ước lượng latency theo `class_id x worker`, giải bài toán LP để phân bổ tải theo class, rồi chuyển thành `worker_weights` cho `weighted_round_robin`.
+- `wrr.mode = lp_latency`: map sang load-balancer-control module `wrr_lp_latency`; module này ước lượng latency theo `class_id x worker`, giải LP để phân bổ tải theo class, rồi chuyển thành `worker_weights` cho `weighted_round_robin`.
 - `wrr.mode = lp_latency` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
 - `wrr.mode = lp_latency` bắt buộc cần `latency_tracker.enabled=true`.
 - `wrr.lp_balance_tolerance` điều khiển biên độ cân bằng tải mỗi worker quanh mức trung bình.
@@ -317,6 +325,11 @@ Ghi chú:
 - `latency_tracker.redirect_policy` hiện có:
   - `fixed_rate`: redirect theo tỉ lệ `rate`, tracker forward theo round-robin.
   - `track_all`: quyết định worker trên LB thật trước, sau đó 100% request đi qua tracker và tracker forward xuống đúng worker LB đã chọn.
+
+Mở rộng thêm module điều khiển LB mới:
+1. Tạo class mới trong `lb_simulation/lb_control_modules.py` kế thừa `LoadBalancerControlModule`.
+2. Gắn `@register_load_balancer_control_module`.
+3. Instantiate module đó trong `LoadBalancerController` theo config mong muốn.
 
 ## 🧪 Dev quick check
 ```bash

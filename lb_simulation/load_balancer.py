@@ -22,6 +22,8 @@ class LoadBalancer:
         epsilon: float = 0.03,
         rng: Optional[random.Random] = None,
     ) -> None:
+        if num_workers <= 0:
+            raise ValueError("num_workers must be > 0.")
         self.num_workers = num_workers
         self.policy = policy.strip().lower()
         self.explore_coef = explore_coef
@@ -32,7 +34,8 @@ class LoadBalancer:
         self.inflight: List[int] = [0 for _ in range(num_workers)]
         self.penalty: List[float] = [0.0 for _ in range(num_workers)]
         self.feedback_count: List[int] = [0 for _ in range(num_workers)]
-        self.worker_weights: List[float] = [1.0 for _ in range(num_workers)]
+        uniform_weight = 1.0 / float(num_workers)
+        self.worker_weights: List[float] = [uniform_weight for _ in range(num_workers)]
         self._policy_impl = create_policy(self.policy)
         self.latency_tracker_worker_id: Optional[int] = None
         self.latency_tracker_inflight = 0
@@ -145,14 +148,23 @@ class LoadBalancer:
             raise ValueError(
                 f"weights length {len(weights)} does not match num_workers {self.num_workers}."
             )
-        normalized: List[float] = []
+        raw_weights: List[float] = []
         for idx, value in enumerate(weights):
             weight = float(value)
             if weight <= 0:
                 raise ValueError(f"weights[{idx}] must be > 0.")
-            normalized.append(weight)
+            raw_weights.append(weight)
+
+        total = sum(raw_weights)
+        if total <= 0:
+            raise ValueError("sum(weights) must be > 0.")
+
+        normalized = [value / total for value in raw_weights]
         self.worker_weights = normalized
-        logger.info("Updated worker weights: %s", [round(value, 6) for value in normalized])
+        logger.info(
+            "Updated worker weights (sum=1): %s",
+            [round(value, 6) for value in normalized],
+        )
 
 
 def supported_policies() -> List[str]:
