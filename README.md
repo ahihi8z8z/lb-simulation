@@ -34,11 +34,8 @@ lb_simulation/
   runner.py
 configs/
   service_classes.example.json
-  service_classes_2class.example.json
   worker_classes.example.json
-  worker_classes_heterogeneous.example.json
-  controller_wrr_inverse.example.json
-  controller_track_all.example.json
+  controller.example.json
 tools/
   plot_detail_metrics.py
   requirements.txt
@@ -56,21 +53,28 @@ pip install -r requirements.txt
 ```
 
 ## ▶️ Cách chạy
-### Bắt buộc truyền file config service class + worker class
+### Chạy nhanh (copy là chạy được)
 ```bash
-python3 simulator.py \
-  --service-class-config configs/service_classes_2class.example.json \
-  --worker-class-config configs/worker_classes.example.json
+.venv/bin/python simulator.py \
+  --service-class-config configs/service_classes.example.json \
+  --worker-class-config configs/worker_classes.example.json \
+  --t-end 30s \
+  --policy round_robin
 ```
 
-### Chọn policy / thời gian mô phỏng
+### Chạy với controller config mẫu
 ```bash
-python3 simulator.py \
+.venv/bin/python simulator.py \
   --service-class-config configs/service_classes.example.json \
-  --worker-class-config configs/worker_classes_heterogeneous.example.json \
-  --t-end 2h \
-  --policy latency_only
+  --worker-class-config configs/worker_classes.example.json \
+  --controller-config configs/controller.example.json \
+  --policy weighted_round_robin \
+  --t-end 30m \
+  --detail
 ```
+
+Ghi chú:
+- `configs/` chỉ giữ một file mẫu cho mỗi loại config: service class, worker class, controller.
 
 ## 🧠 Chính sách load balancer hỗ trợ
 - `random`
@@ -128,17 +132,17 @@ Khi bật `--detail`, mọi request hoàn thành sẽ được ghi vào:
 - `request_detail_metrics.csv` trong chính thư mục run đó.
 
 ```bash
-python3 simulator.py \
+.venv/bin/python simulator.py \
   --service-class-config configs/service_classes.example.json \
   --worker-class-config configs/worker_classes.example.json \
-  --controller-config configs/controller_wrr_inverse.example.json \
+  --controller-config configs/controller.example.json \
   --policy weighted_round_robin \
   --t-end 30m
 ```
 
 Hoặc chạy không controller config (mặc định no-op):
 ```bash
-python3 simulator.py \
+.venv/bin/python simulator.py \
   --service-class-config configs/service_classes.example.json \
   --worker-class-config configs/worker_classes.example.json \
   --detail
@@ -186,25 +190,21 @@ Ví dụ:
     {
       "class_id": 0,
       "arrival_mode": "trace_replay",
-      "model": "GPT-4",
+      "model": "ChatGPT",
       "log_type": "Conversation log",
-      "trace_file": "traces/class0.csv",
+      "trace_file": "../traces/BurstGPT_without_fails_1.csv",
       "zipf": { "s": 1.2, "xmin": 16, "max": 2048 }
     },
     {
       "class_id": 1,
       "arrival_mode": "modeled_gamma",
-      "model": "ChatGPT",
-      "log_type": "Conversation log",
+      "model": "GPT-4",
+      "log_type": "API log",
       "gamma_windows": [
-        { "window_end": 1200, "alpha": 2.5, "beta": 0.3 },
-        { "window_end": 2400, "alpha": 2.0, "beta": 0.65 }
+        { "window_end": 300, "alpha": 1.8, "beta": 0.9 },
+        { "window_end": 900, "alpha": 2.4, "beta": 0.45 },
+        { "window_end": 1800, "alpha": 1.6, "beta": 1.1 }
       ]
-    },
-    {
-      "class_id": 2,
-      "arrival_mode": "modeled_gamma",
-      "gamma": { "alpha": 2.3, "beta": 0.4, "window_size": 1200 }
     }
   ]
 }
@@ -223,6 +223,7 @@ Worker được khai báo theo class, mỗi class có:
 Service models built-in:
 - `contention_lognormal`: `S = (a+b*z)*(1+c*n_local)*(1+d*max(0,N-n0))*LogNormal(0,sigma)`
 - `linear_lognormal`: `S = (a+b*z)*LogNormal(0,sigma)`
+- `fixed`: `S = service_time` (hằng số)
 
 Ví dụ:
 ```json
@@ -239,6 +240,12 @@ Ví dụ:
       "count": 2,
       "service_model": "linear_lognormal",
       "params": { "a": 0.04, "b": 0.003, "sigma": 0.1 }
+    },
+    {
+      "class_id": 2,
+      "count": 1,
+      "service_model": "fixed",
+      "params": { "service_time": 0.08 }
     }
   ]
 }
@@ -284,7 +291,7 @@ Ghi chú:
 
 ## 🧪 Dev quick check
 ```bash
-python3 -m py_compile simulator.py lb_simulation/*.py
+.venv/bin/python -m py_compile simulator.py lb_simulation/*.py
 ```
 
 ## 🧰 Tools ngoài simulator

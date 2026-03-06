@@ -53,6 +53,14 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
             "sigma": 0.2,
             "min_s": 0.001
           }
+        },
+        {
+          "class_id": 1,
+          "count": 2,
+          "service_model": "fixed",
+          "params": {
+            "service_time": 0.08
+          }
         }
       ]
     }

@@ -130,3 +130,20 @@ class LinearLognormalModel(WorkerServiceModel):
         base = self.a + self.b * context.job_size
         noise = rng.lognormvariate(0.0, self.sigma) if self.sigma > 0 else 1.0
         return max(self.min_s, base * noise)
+
+
+@register_worker_model
+class FixedServiceTimeModel(WorkerServiceModel):
+    """S = service_time (constant)."""
+
+    name = "fixed"
+
+    def __init__(self, params: Mapping[str, Any], total_workers: int) -> None:
+        del total_workers
+        self.service_time = _as_float(params, "service_time", 0.05)
+        if self.service_time < 0:
+            raise ValueError("fixed.service_time must be >= 0.")
+
+    def sample_service_time(self, context: ServiceTimeContext, rng: random.Random) -> float:
+        del context, rng
+        return self.service_time

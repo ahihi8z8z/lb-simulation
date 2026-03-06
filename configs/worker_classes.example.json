@@ -2,16 +2,34 @@
   "classes": [
     {
       "class_id": 0,
-      "count": 8,
+      "count": 4,
       "service_model": "contention_lognormal",
       "params": {
         "a": 0.03,
         "b": 0.002,
         "c": 0.12,
         "d": 0.015,
-        "n0": 32,
         "sigma": 0.2,
         "min_s": 0.001
+      }
+    },
+    {
+      "class_id": 1,
+      "count": 2,
+      "service_model": "linear_lognormal",
+      "params": {
+        "a": 0.04,
+        "b": 0.003,
+        "sigma": 0.1,
+        "min_s": 0.001
+      }
+    },
+    {
+      "class_id": 2,
+      "count": 2,
+      "service_model": "fixed",
+      "params": {
+        "service_time": 0.05
       }
     }
   ]
