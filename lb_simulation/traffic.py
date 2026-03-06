@@ -32,6 +32,7 @@ class ServiceClassTrafficSpec:
 
     class_id: int
     arrival_mode: str
+    description: str = ""
     model: str = "modeled"
     log_type: str = "modeled_gamma"
     trace_traffic_scale: int = 1
@@ -397,6 +398,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         {
           "class_id": 0,
           "arrival_mode": "trace_replay" | "modeled_gamma",
+          "description": "Mô tả class traffic này mô hình hóa workload nào",
           "model": "GPT-4",
           "log_type": "Conversation log",
           "trace_file": "traces/class0.csv",
@@ -435,6 +437,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         seen_class_ids.add(class_id)
 
         arrival_mode = str(item.get("arrival_mode", "modeled_gamma")).strip().lower()
+        description = str(item.get("description", "")).strip()
         model = str(item.get("model", "modeled")).strip() or "modeled"
         log_type = str(item.get("log_type", "modeled_gamma")).strip() or "modeled_gamma"
         trace_traffic_scale = 1
@@ -562,6 +565,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
             ServiceClassTrafficSpec(
                 class_id=class_id,
                 arrival_mode=arrival_mode,
+                description=description,
                 model=model,
                 log_type=log_type,
                 trace_traffic_scale=trace_traffic_scale,
@@ -575,9 +579,10 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
             )
         )
         logger.debug(
-            "Loaded service class class_id=%d mode=%s trace_records=%d",
+            "Loaded service class class_id=%d mode=%s description=%s trace_records=%d",
             class_id,
             arrival_mode,
+            description,
             len(trace_records),
         )
 

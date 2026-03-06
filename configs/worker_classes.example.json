@@ -2,6 +2,7 @@
   "classes": [
     {
       "class_id": 0,
+      "description": "Worker nặng, chịu ảnh hưởng contention local/global",
       "count": 4,
       "service_model": "contention_lognormal",
       "params": {
@@ -15,6 +16,7 @@
     },
     {
       "class_id": 1,
+      "description": "Worker tuyến tính cho profile latency ổn định hơn",
       "count": 2,
       "service_model": "linear_lognormal",
       "params": {
@@ -26,6 +28,7 @@
     },
     {
       "class_id": 2,
+      "description": "Worker fixed service time để làm baseline",
       "count": 2,
       "service_model": "fixed",
       "params": {

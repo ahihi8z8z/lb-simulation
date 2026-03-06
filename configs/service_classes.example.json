@@ -2,6 +2,7 @@
   "classes": [
     {
       "class_id": 0,
+      "description": "Replay traffic cho ChatGPT Conversation log từ trace BurstGPT",
       "arrival_mode": "trace_replay",
       "model": "ChatGPT",
       "log_type": "Conversation log",
@@ -10,6 +11,7 @@
     },
     {
       "class_id": 1,
+      "description": "Traffic modeled bằng gamma + Zipf cho GPT-4 API log",
       "arrival_mode": "modeled_gamma",
       "model": "GPT-4",
       "log_type": "API log",

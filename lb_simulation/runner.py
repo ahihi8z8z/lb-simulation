@@ -128,8 +128,18 @@ def run_simulation(
     if not class_specs:
         raise ValueError("service_class_config does not contain any class entry.")
     effective_service_classes = len(class_specs)
+    service_class_descriptions = {
+        str(spec.class_id): spec.description
+        for spec in class_specs
+        if spec.description
+    }
     worker_class_specs = load_worker_class_config(worker_class_config)
     effective_worker_classes = len(worker_class_specs)
+    worker_class_descriptions = {
+        str(spec.class_id): spec.description
+        for spec in worker_class_specs
+        if spec.description
+    }
     worker_specs = expand_worker_specs(worker_class_specs)
     num_workers = len(worker_specs)
     controller_cfg = load_controller_config(controller_config)
@@ -170,9 +180,11 @@ def run_simulation(
             "seed": seed,
             "service_class_config": str(service_class_config),
             "service_class_config_snapshot_file": str(service_config_snapshot_path),
+            "service_class_descriptions": service_class_descriptions,
             "t_end": t_end,
             "worker_class_config": str(worker_class_config),
             "worker_class_config_snapshot_file": str(worker_config_snapshot_path),
+            "worker_class_descriptions": worker_class_descriptions,
             "worker_classes": effective_worker_classes,
             "workers": num_workers,
             "lb_workers": num_workers + (1 if controller.latency_tracker_enabled else 0),
@@ -333,7 +345,9 @@ def run_simulation(
     summary["run_config_file"] = str(run_config_path)
     summary["run_dir"] = str(run_dir)
     summary["service_class_config_snapshot_file"] = str(service_config_snapshot_path)
+    summary["service_class_descriptions"] = service_class_descriptions
     summary["worker_class_config_snapshot_file"] = str(worker_config_snapshot_path)
+    summary["worker_class_descriptions"] = worker_class_descriptions
     summary["controller_config_snapshot_file"] = (
         str(controller_config_snapshot_path) if controller_config_snapshot_path else ""
     )
@@ -412,6 +426,12 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"lb workers            : {summary.get('lb_workers', summary['workers'])}")
     print(f"worker classes        : {summary['worker_classes']}")
     print(f"service classes       : {summary['service_classes']}")
+    service_desc = summary.get("service_class_descriptions", {})
+    worker_desc = summary.get("worker_class_descriptions", {})
+    if isinstance(service_desc, dict) and service_desc:
+        print(f"service class desc    : {len(service_desc)} configured")
+    if isinstance(worker_desc, dict) and worker_desc:
+        print(f"worker class desc     : {len(worker_desc)} configured")
     if summary["service_class_config_file"]:
         print(f"service class config  : {summary['service_class_config_file']}")
     if summary["worker_class_config_file"]:

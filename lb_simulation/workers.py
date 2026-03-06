@@ -20,6 +20,7 @@ class WorkerClassSpec:
     class_id: int
     count: int
     service_model: str
+    description: str = ""
     params: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -29,6 +30,7 @@ class WorkerSpec:
 
     worker_id: int
     worker_class_id: int
+    worker_class_description: str
     service_model: str
     service_model_impl: WorkerServiceModel
 
@@ -42,6 +44,7 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
       "classes": [
         {
           "class_id": 0,
+          "description": "Mô hình worker GPU lớn cho workload nặng",
           "count": 8,
           "service_model": "contention_lognormal",
           "params": {
@@ -56,6 +59,7 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
         },
         {
           "class_id": 1,
+          "description": "Worker lightweight với service time cố định",
           "count": 2,
           "service_model": "fixed",
           "params": {
@@ -94,6 +98,7 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
         if count <= 0:
             raise ValueError(f"classes[{idx}].count must be > 0.")
 
+        description = str(item.get("description", "")).strip()
         service_model = str(item.get("service_model", "contention_lognormal")).strip().lower()
         if not service_model:
             raise ValueError(f"classes[{idx}].service_model must be non-empty.")
@@ -108,15 +113,17 @@ def load_worker_class_config(path: Path) -> List[WorkerClassSpec]:
             WorkerClassSpec(
                 class_id=class_id,
                 count=count,
+                description=description,
                 service_model=service_model,
                 params=dict(params),
             )
         )
         logger.debug(
-            "Worker class loaded class_id=%d count=%d model=%s",
+            "Worker class loaded class_id=%d count=%d model=%s description=%s",
             class_id,
             count,
             service_model,
+            description,
         )
 
     if not specs:
@@ -148,6 +155,7 @@ def expand_worker_specs(worker_class_specs: Sequence[WorkerClassSpec]) -> List[W
                 WorkerSpec(
                     worker_id=next_worker_id,
                     worker_class_id=class_spec.class_id,
+                    worker_class_description=class_spec.description,
                     service_model=class_spec.service_model,
                     service_model_impl=create_worker_model(
                         name=class_spec.service_model,

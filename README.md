@@ -159,6 +159,7 @@ CSV columns:
 
 ## 🧩 Service class config (JSON)
 Khi dùng `--service-class-config`, mỗi class có thể tự chọn:
+- `description`: mô tả class này mô hình hóa workload nào (optional)
 - `trace_replay`: trỏ tới `trace_file`, `job_size` lấy trực tiếp từ cột `Total tokens`
 - `modeled_gamma`: dùng `gamma_windows` hoặc `gamma` cố định cho inter-arrival
 - Có thể set mặc định `model` và `log_type` cho class (đặc biệt hữu ích với `modeled_gamma`)
@@ -195,6 +196,7 @@ Ví dụ:
   "classes": [
     {
       "class_id": 0,
+      "description": "Replay traffic cho ChatGPT Conversation log từ trace BurstGPT",
       "arrival_mode": "trace_replay",
       "model": "ChatGPT",
       "log_type": "Conversation log",
@@ -203,6 +205,7 @@ Ví dụ:
     },
     {
       "class_id": 1,
+      "description": "Traffic modeled bằng gamma + Zipf cho GPT-4 API log",
       "arrival_mode": "modeled_gamma",
       "model": "GPT-4",
       "log_type": "API log",
@@ -226,6 +229,7 @@ Ghi chú:
 
 ## 🧩 Worker class config (JSON)
 Worker được khai báo theo class, mỗi class có:
+- `description`: mô tả class worker này mô hình hóa loại tài nguyên/phần cứng nào (optional)
 - `count`: số worker trong class
 - `service_model`: mô hình phục vụ (service-time model)
 - `params`: tham số cho mô hình đó
@@ -241,18 +245,21 @@ Ví dụ:
   "classes": [
     {
       "class_id": 0,
+      "description": "Worker nặng, chịu ảnh hưởng contention local/global",
       "count": 6,
       "service_model": "contention_lognormal",
       "params": { "a": 0.03, "b": 0.002, "c": 0.12, "d": 0.015, "sigma": 0.2 }
     },
     {
       "class_id": 1,
+      "description": "Worker tuyến tính cho profile latency ổn định hơn",
       "count": 2,
       "service_model": "linear_lognormal",
       "params": { "a": 0.04, "b": 0.003, "sigma": 0.1 }
     },
     {
       "class_id": 2,
+      "description": "Worker fixed service time để làm baseline",
       "count": 1,
       "service_model": "fixed",
       "params": { "service_time": 0.08 }
