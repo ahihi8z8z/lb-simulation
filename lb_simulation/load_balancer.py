@@ -1,7 +1,7 @@
 """Load balancer state and policy dispatch."""
 
 import random
-from typing import List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from .lb_policies import available_policy_names, create_policy
 from .models import Request
@@ -31,6 +31,11 @@ class LoadBalancer:
         self.feedback_count: List[int] = [0 for _ in range(num_workers)]
         self.worker_weights: List[float] = [1.0 for _ in range(num_workers)]
         self._policy_impl = create_policy(self.policy)
+        self.latency_tracker_worker_id: Optional[int] = None
+        self.latency_tracker_inflight = 0
+        self.latency_tracker_dispatches = 0
+        self._should_redirect_to_tracker: Optional[Callable[[Request], bool]] = None
+        self._redirect_target_by_rid: Dict[int, int] = {}
 
     def argmin_score(self, scores: Sequence[float]) -> int:
         min_val = min(scores)
@@ -39,13 +44,53 @@ class LoadBalancer:
         return self.rng.choice(ties)
 
     def choose_worker(self, request: Request) -> int:
-        return self._policy_impl.choose_worker(request, self)
+        worker_id = self._policy_impl.choose_worker(request, self)
+        if self._should_redirect_to_tracker is not None:
+            should_redirect = self._should_redirect_to_tracker(request)
+            if should_redirect and self.latency_tracker_worker_id is not None:
+                self._redirect_target_by_rid[request.rid] = worker_id
+                return self.latency_tracker_worker_id
+        return worker_id
 
     def on_dispatch(self, worker_id: int) -> None:
+        if (
+            self.latency_tracker_worker_id is not None
+            and worker_id == self.latency_tracker_worker_id
+        ):
+            self.latency_tracker_inflight += 1
+            self.latency_tracker_dispatches += 1
+            return
         self.inflight[worker_id] += 1
 
     def on_complete(self, worker_id: int) -> None:
+        if (
+            self.latency_tracker_worker_id is not None
+            and worker_id == self.latency_tracker_worker_id
+        ):
+            self.latency_tracker_inflight = max(0, self.latency_tracker_inflight - 1)
+            return
         self.inflight[worker_id] = max(0, self.inflight[worker_id] - 1)
+
+    def configure_latency_tracker(
+        self,
+        tracker_worker_id: int,
+        should_redirect: Callable[[Request], bool],
+    ) -> None:
+        """Configure optional latency-tracker worker redirection."""
+
+        if tracker_worker_id < 0:
+            raise ValueError("tracker_worker_id must be >= 0.")
+        if tracker_worker_id < self.num_workers:
+            raise ValueError(
+                "tracker_worker_id must not overlap with real worker indexes."
+            )
+        self.latency_tracker_worker_id = tracker_worker_id
+        self._should_redirect_to_tracker = should_redirect
+
+    def consume_redirect_target(self, request_id: int) -> Optional[int]:
+        """Get and clear real worker selected before tracker redirection."""
+
+        return self._redirect_target_by_rid.pop(request_id, None)
 
     def set_latency_estimate(self, worker_id: int, estimate: float, feedback_count: int) -> None:
         """Apply controller-provided latency estimate for a worker."""

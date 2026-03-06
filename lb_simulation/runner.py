@@ -114,6 +114,12 @@ def run_simulation(
     worker_specs = expand_worker_specs(worker_class_specs)
     num_workers = len(worker_specs)
     controller_cfg = load_controller_config(controller_config)
+    controller = LoadBalancerController(
+        policy=policy,
+        num_workers=num_workers,
+        config=controller_cfg,
+        rng=random.Random(rng.randrange(1, 2**31)),
+    )
 
     run_dir = _create_run_dir(logs_root)
     service_config_snapshot_path = run_dir / "service_class_config.json"
@@ -143,6 +149,7 @@ def run_simulation(
             "worker_class_config_snapshot_file": str(worker_config_snapshot_path),
             "worker_classes": effective_worker_classes,
             "workers": num_workers,
+            "lb_workers": num_workers + (1 if controller.latency_tracker_enabled else 0),
         },
     )
 
@@ -159,12 +166,6 @@ def run_simulation(
         num_workers=num_workers,
         policy=policy,
         rng=rng,
-    )
-    controller = LoadBalancerController(
-        policy=policy,
-        num_workers=num_workers,
-        config=controller_cfg,
-        rng=random.Random(rng.randrange(1, 2**31)),
     )
     controller.initialize(load_balancer)
 
@@ -192,14 +193,44 @@ def run_simulation(
     )
 
     def on_arrival(request: Request) -> None:
-        worker_id = load_balancer.choose_worker(request)
-        latency_tracked = controller.should_track_latency(request, worker_id)
-        load_balancer.on_dispatch(worker_id)
+        lb_selected_worker_id = load_balancer.choose_worker(request)
+        if controller.is_latency_tracker_worker(lb_selected_worker_id):
+            # The latency-tracker worker itself has zero service time and only forwards
+            # to a real worker (RR or selected-worker mode, depending on policy).
+            selected_worker_id = load_balancer.consume_redirect_target(request.rid)
+            forwarded_worker_id = controller.forward_via_latency_tracker(
+                request,
+                selected_worker_id=selected_worker_id,
+            )
+            load_balancer.on_dispatch(lb_selected_worker_id)
+            load_balancer.on_dispatch(forwarded_worker_id)
+            inference_pool.dispatch(
+                request,
+                forwarded_worker_id,
+                load_balancer,
+                latency_tracked=True,
+                lb_completion_worker_ids=[
+                    forwarded_worker_id,
+                    lb_selected_worker_id,
+                ],
+                lb_selected_worker_id=(
+                    selected_worker_id
+                    if selected_worker_id is not None
+                    else lb_selected_worker_id
+                ),
+                routed_via_latency_tracker=True,
+            )
+            return
+
+        load_balancer.on_dispatch(lb_selected_worker_id)
         inference_pool.dispatch(
             request,
-            worker_id,
+            lb_selected_worker_id,
             load_balancer,
-            latency_tracked=latency_tracked,
+            latency_tracked=False,
+            lb_completion_worker_ids=[lb_selected_worker_id],
+            lb_selected_worker_id=lb_selected_worker_id,
+            routed_via_latency_tracker=False,
         )
 
     rid_counter = 0
@@ -247,6 +278,7 @@ def run_simulation(
     summary["drain_time"] = max(0.0, env.now - t_end)
     summary["policy"] = policy
     summary["workers"] = num_workers
+    summary["lb_workers"] = num_workers + (1 if controller.latency_tracker_enabled else 0)
     summary["worker_classes"] = effective_worker_classes
     summary["arrival_mode"] = "per_class_config"
     summary["service_classes"] = effective_service_classes
@@ -321,6 +353,7 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"policy                : {summary['policy']}")
     print(f"arrival_mode          : {summary['arrival_mode']}")
     print(f"workers               : {summary['workers']}")
+    print(f"lb workers            : {summary.get('lb_workers', summary['workers'])}")
     print(f"worker classes        : {summary['worker_classes']}")
     print(f"service classes       : {summary['service_classes']}")
     if summary["service_class_config_file"]:
@@ -352,6 +385,13 @@ def print_summary(summary: Dict[str, object]) -> None:
         print(f"controller mode       : {controller.get('mode', '')}")
         print(f"latency tracker       : {controller.get('latency_tracker_enabled', False)}")
         print(f"latency samples       : {controller.get('latency_samples_total', 0)}")
+        print(
+            "latency redirects     : "
+            f"{controller.get('track_redirected', 0)} / {controller.get('track_decisions', 0)}"
+        )
+        redirect_policy = controller.get("latency_redirect_policy", {})
+        if isinstance(redirect_policy, dict) and redirect_policy.get("name"):
+            print(f"redirect policy       : {redirect_policy.get('name')}")
         print(f"wrr control mode      : {controller.get('wrr_control_mode', 'none')}")
 
     by_class = summary.get("latency_by_class", {})

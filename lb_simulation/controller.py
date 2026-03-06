@@ -8,19 +8,30 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .latency_redirect_policies import create_latency_redirect_policy
 from .models import Request
 
 LATENCY_AWARE_POLICIES = frozenset({"peak_ewma", "latency_only"})
 
 
 @dataclass
+class LatencyRedirectPolicyConfig:
+    """Configuration for latency-tracker redirect policy."""
+
+    name: str = "fixed_rate"
+    params: Dict[str, object] = field(default_factory=lambda: {"rate": 0.05})
+
+
+@dataclass
 class LatencyTrackerConfig:
-    """Configuration for sampled latency tracking."""
+    """Configuration for latency tracker worker."""
 
     enabled: Optional[bool] = None
-    sample_rate: float = 0.05
     init_estimate: float = 0.5
     ewma_gamma: float = 0.10
+    redirect_policy: LatencyRedirectPolicyConfig = field(
+        default_factory=LatencyRedirectPolicyConfig
+    )
 
 
 @dataclass
@@ -81,20 +92,13 @@ def _parse_controller_payload(
 ) -> ControllerConfig:
     latency_cfg_raw = payload.get("latency_tracker")
     latency_cfg_dict = latency_cfg_raw if isinstance(latency_cfg_raw, dict) else {}
+    redirect_policy_cfg = _parse_redirect_policy_config(
+        raw=latency_cfg_dict.get("redirect_policy"),
+        legacy_sample_rate_raw=latency_cfg_dict.get("sample_rate"),
+    )
     latency_cfg = LatencyTrackerConfig(
         enabled=_to_bool_optional(
             latency_cfg_dict.get("enabled"), "latency_tracker.enabled", None
-        ),
-        sample_rate=max(
-            0.0,
-            min(
-                1.0,
-                _to_float(
-                    latency_cfg_dict.get("sample_rate"),
-                    "latency_tracker.sample_rate",
-                    0.05,
-                ),
-            ),
         ),
         init_estimate=max(
             1e-9,
@@ -115,6 +119,7 @@ def _parse_controller_payload(
                 ),
             ),
         ),
+        redirect_policy=redirect_policy_cfg,
     )
 
     wrr_cfg_raw = payload.get("wrr")
@@ -195,23 +200,118 @@ def load_controller_config(
     return _parse_controller_payload(payload)
 
 
-class SampledLatencyTracker:
-    """Track latency estimates from a sampled subset of request completions."""
+def _parse_redirect_policy_config(
+    raw: object,
+    legacy_sample_rate_raw: object,
+) -> LatencyRedirectPolicyConfig:
+    """Parse latency-tracker redirect policy with backward compatibility."""
+
+    if raw is None:
+        rate = max(
+            0.0,
+            min(
+                1.0,
+                _to_float(
+                    legacy_sample_rate_raw,
+                    "latency_tracker.sample_rate",
+                    0.05,
+                ),
+            ),
+        )
+        return LatencyRedirectPolicyConfig(
+            name="fixed_rate",
+            params={"rate": rate},
+        )
+
+    if isinstance(raw, str):
+        name = raw.strip().lower() or "fixed_rate"
+        return LatencyRedirectPolicyConfig(name=name, params={})
+
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "latency_tracker.redirect_policy must be a string or object."
+        )
+
+    name = str(raw.get("name", "fixed_rate")).strip().lower() or "fixed_rate"
+    params_raw = raw.get("params", {})
+    if params_raw is None:
+        params_raw = {}
+    if not isinstance(params_raw, dict):
+        raise ValueError("latency_tracker.redirect_policy.params must be an object.")
+
+    params: Dict[str, object] = dict(params_raw)
+    # Convenience form:
+    # "redirect_policy": {"name": "fixed_rate", "rate": 0.05}
+    if ("rate" in raw) and ("rate" not in params):
+        params["rate"] = raw.get("rate")
+    return LatencyRedirectPolicyConfig(name=name, params=params)
+
+
+class LatencyTrackerWorker:
+    """
+    Special worker used for sampled latency tracking.
+
+    The tracker itself has zero processing time and forwards requests to real workers
+    using an internal round-robin dispatcher.
+    """
 
     def __init__(
         self,
         num_workers: int,
+        tracker_worker_id: int,
         config: LatencyTrackerConfig,
-        ewma_gamma: float,
+        rng: random.Random,
     ) -> None:
-        self.sample_rate = config.sample_rate
-        self.ewma_gamma = max(0.0, min(1.0, float(ewma_gamma)))
+        self.num_workers = num_workers
+        self.tracker_worker_id = tracker_worker_id
+        self.ewma_gamma = max(0.0, min(1.0, float(config.ewma_gamma)))
         self.estimates: List[float] = [config.init_estimate for _ in range(num_workers)]
         self.sample_counts: List[int] = [0 for _ in range(num_workers)]
         self.sampled_requests = 0
+        self.redirect_policy_name = config.redirect_policy.name
+        self.redirect_policy_params: Dict[str, object] = dict(config.redirect_policy.params)
+        self.redirect_policy = create_latency_redirect_policy(
+            config.redirect_policy.name,
+            params=config.redirect_policy.params,
+        )
+        self.forward_mode = str(
+            getattr(self.redirect_policy, "forward_mode", "round_robin")
+        ).strip()
+        if self.forward_mode not in {"round_robin", "selected_worker"}:
+            raise ValueError(
+                "latency_tracker.redirect_policy has unsupported forward_mode: "
+                f"{self.forward_mode}"
+            )
+        self.redirect_rate = float(getattr(self.redirect_policy, "rate", 0.0))
+        self.redirect_policy_params["rate"] = self.redirect_rate
+        self.redirect_policy_params["forward_mode"] = self.forward_mode
+        self.rng = rng
+        self.redirect_decisions = 0
+        self.redirected_requests = 0
+        self._next_forward_worker = 0
 
-    def should_track(self, rng: random.Random) -> bool:
-        return rng.random() < self.sample_rate
+    def should_redirect(self, request: Request) -> bool:
+        self.redirect_decisions += 1
+        selected = self.redirect_policy.should_redirect(request, self.rng)
+        if selected:
+            self.redirected_requests += 1
+        return selected
+
+    def pick_forward_worker(
+        self,
+        request: Request,
+        selected_worker_id: Optional[int] = None,
+    ) -> int:
+        del request
+        if self.forward_mode == "selected_worker":
+            if selected_worker_id is None:
+                raise ValueError(
+                    "selected_worker_id is required for selected_worker forward mode."
+                )
+            return selected_worker_id
+        worker_id = self._next_forward_worker
+        self._next_forward_worker = (self._next_forward_worker + 1) % self.num_workers
+        return worker_id
 
     def observe(self, worker_id: int, latency: float) -> None:
         previous = self.estimates[worker_id]
@@ -223,7 +323,7 @@ class SampledLatencyTracker:
 
 
 class LoadBalancerController:
-    """Controller hooks for sampled latency tracking and LB parameter control."""
+    """Controller hooks for latency tracking and LB parameter control."""
 
     def __init__(
         self,
@@ -234,11 +334,11 @@ class LoadBalancerController:
     ) -> None:
         self.policy = policy.strip().lower()
         self.num_workers = num_workers
+        self.tracker_worker_id = num_workers
         self.config = config
         self.rng = rng or random.Random()
         self.control_mode = config.mode
         self.completion_count = 0
-        self.track_decision_count = 0
 
         requested = config.latency_tracker.enabled
         if requested is None:
@@ -250,30 +350,46 @@ class LoadBalancerController:
                 f"Policy '{self.policy}' requires latency tracker in controller."
             )
 
-        self.latency_tracker: Optional[SampledLatencyTracker]
+        self.latency_tracker: Optional[LatencyTrackerWorker]
         if self.latency_tracker_enabled:
-            self.latency_tracker = SampledLatencyTracker(
+            self.latency_tracker = LatencyTrackerWorker(
                 num_workers=num_workers,
+                tracker_worker_id=self.tracker_worker_id,
                 config=config.latency_tracker,
-                ewma_gamma=config.latency_tracker.ewma_gamma,
+                rng=random.Random(self.rng.randrange(1, 2**31)),
             )
         else:
             self.latency_tracker = None
 
     def initialize(self, lb: "LoadBalancer") -> None:
         if self.latency_tracker is not None:
+            lb.configure_latency_tracker(
+                tracker_worker_id=self.latency_tracker.tracker_worker_id,
+                should_redirect=self.latency_tracker.should_redirect,
+            )
             for worker_id, estimate in enumerate(self.latency_tracker.estimates):
                 lb.set_latency_estimate(worker_id, estimate, feedback_count=0)
 
         if self.config.wrr.weights is not None:
             lb.set_worker_weights(self.config.wrr.weights)
 
-    def should_track_latency(self, request: Request, worker_id: int) -> bool:
-        del request, worker_id
-        self.track_decision_count += 1
+    def is_latency_tracker_worker(self, worker_id: int) -> bool:
+        return (
+            self.latency_tracker is not None
+            and worker_id == self.latency_tracker.tracker_worker_id
+        )
+
+    def forward_via_latency_tracker(
+        self,
+        request: Request,
+        selected_worker_id: Optional[int] = None,
+    ) -> int:
         if self.latency_tracker is None:
-            return False
-        return self.latency_tracker.should_track(self.rng)
+            raise RuntimeError("Latency tracker is not enabled.")
+        return self.latency_tracker.pick_forward_worker(
+            request,
+            selected_worker_id=selected_worker_id,
+        )
 
     def _maybe_update_wrr_weights(self, lb: "LoadBalancer") -> None:
         if self.policy != "weighted_round_robin":
@@ -320,7 +436,6 @@ class LoadBalancerController:
         summary: Dict[str, object] = {
             "mode": self.control_mode,
             "policy": self.policy,
-            "track_decisions": self.track_decision_count,
             "completions_seen": self.completion_count,
             "wrr_control_mode": self.config.wrr.mode,
             "wrr_weights": [float(value) for value in lb.worker_weights],
@@ -328,14 +443,31 @@ class LoadBalancerController:
         }
 
         if self.latency_tracker is not None:
-            summary["latency_sample_rate"] = self.latency_tracker.sample_rate
+            summary["track_decisions"] = self.latency_tracker.redirect_decisions
+            summary["track_redirected"] = self.latency_tracker.redirected_requests
+            summary["latency_sample_rate"] = float(
+                self.latency_tracker.redirect_rate
+            )
             summary["latency_tracker_ewma_gamma"] = self.latency_tracker.ewma_gamma
+            summary["latency_tracker_worker_id"] = self.latency_tracker.tracker_worker_id
+            summary["latency_tracker_dispatches"] = lb.latency_tracker_dispatches
+            summary["latency_tracker_inflight"] = lb.latency_tracker_inflight
+            summary["latency_redirect_policy"] = {
+                "name": self.latency_tracker.redirect_policy_name,
+                "params": dict(self.latency_tracker.redirect_policy_params),
+            }
             summary["latency_samples_total"] = self.latency_tracker.sampled_requests
             summary["latency_samples_by_worker"] = list(self.latency_tracker.sample_counts)
             summary["latency_estimate_by_worker"] = list(self.latency_tracker.estimates)
         else:
+            summary["track_decisions"] = 0
+            summary["track_redirected"] = 0
             summary["latency_sample_rate"] = 0.0
             summary["latency_tracker_ewma_gamma"] = 0.0
+            summary["latency_tracker_worker_id"] = None
+            summary["latency_tracker_dispatches"] = 0
+            summary["latency_tracker_inflight"] = 0
+            summary["latency_redirect_policy"] = {}
             summary["latency_samples_total"] = 0
             summary["latency_samples_by_worker"] = []
             summary["latency_estimate_by_worker"] = []

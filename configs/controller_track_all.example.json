@@ -1,0 +1,14 @@
+{
+  "mode": "none",
+  "latency_tracker": {
+    "enabled": true,
+    "init_estimate": 0.5,
+    "ewma_gamma": 0.1,
+    "redirect_policy": {
+      "name": "track_all"
+    }
+  },
+  "wrr": {
+    "mode": "none"
+  }
+}

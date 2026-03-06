@@ -22,6 +22,7 @@ lb_simulation/
   utils.py
   metrics.py
   controller.py
+  latency_redirect_policies.py
   load_balancer.py
   lb_policies.py
   inference_pool.py
@@ -36,6 +37,7 @@ configs/
   worker_classes.example.json
   worker_classes_heterogeneous.example.json
   controller_wrr_inverse.example.json
+  controller_track_all.example.json
 tools/
   plot_full_log.py
   requirements.txt
@@ -98,8 +100,10 @@ Mặc định (không truyền `--controller-config`) controller ở chế độ
 Latency tracking đã tách khỏi Load Balancer:
 - LB không tự học latency từ toàn bộ completion.
 - Với policy cần latency (`peak_ewma`, `latency_only`), controller tự bật latency tracker.
-- Controller chỉ sample một phần nhỏ traffic (`sample_rate`) để cập nhật latency estimate.
-- Policy cần latency sẽ dùng estimate này.
+- Latency tracker được mô hình như một worker đặc biệt: service time = 0, rồi forward request tới worker thật.
+- Controller gửi cho LB policy redirect để quyết định tỉ lệ request đi qua latency tracker.
+- Redirect policy có thể điều khiển cách forward (`round_robin` hoặc forward về đúng worker LB đã chọn).
+- Chỉ request đi qua latency tracker mới được dùng để cập nhật latency estimate.
 
 ## 📊 Metrics đầu ra
 - Mean / Median / P95 / P99 latency
@@ -144,6 +148,7 @@ CSV columns:
 - `job_size`, `model`, `log_type`
 - `t_arrival`, `t_start`, `t_done`
 - `queue_len_on_dispatch`, `n_local_at_start`, `n_global_at_start`
+- `lb_selected_worker_id`, `routed_via_latency_tracker`
 - `latency_tracked` (request này có được sample vào latency tracker hay không)
 - `service_time`, `latency`
 
@@ -250,9 +255,14 @@ Ví dụ:
   "mode": "none",
   "latency_tracker": {
     "enabled": true,
-    "sample_rate": 0.05,
     "init_estimate": 0.5,
-    "ewma_gamma": 0.1
+    "ewma_gamma": 0.1,
+    "redirect_policy": {
+      "name": "fixed_rate",
+      "params": {
+        "rate": 0.05
+      }
+    }
   },
   "wrr": {
     "mode": "inverse_latency",
@@ -267,6 +277,9 @@ Ví dụ:
 Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
 - `latency_tracker.ewma_gamma` là hệ số EWMA để ước lượng latency từ sample.
+- `latency_tracker.redirect_policy` hiện có:
+  - `fixed_rate`: redirect theo tỉ lệ `rate`, tracker forward theo round-robin.
+  - `track_all`: quyết định worker trên LB thật trước, sau đó 100% request đi qua tracker và tracker forward xuống đúng worker LB đã chọn.
 
 ## 🧪 Dev quick check
 ```bash

@@ -23,6 +23,8 @@ class RequestCsvLogger:
         "queue_len_on_dispatch",
         "n_local_at_start",
         "n_global_at_start",
+        "lb_selected_worker_id",
+        "routed_via_latency_tracker",
         "latency_tracked",
         "service_time",
         "latency",

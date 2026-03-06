@@ -50,9 +50,22 @@ class InferencePool:
         worker_id: int,
         lb: LoadBalancer,
         latency_tracked: bool = False,
+        lb_completion_worker_ids: Optional[List[int]] = None,
+        lb_selected_worker_id: Optional[int] = None,
+        routed_via_latency_tracker: bool = False,
     ) -> None:
         self.global_inflight += 1
-        self.env.process(self._serve(request, worker_id, lb, latency_tracked))
+        self.env.process(
+            self._serve(
+                request=request,
+                worker_id=worker_id,
+                lb=lb,
+                latency_tracked=latency_tracked,
+                lb_completion_worker_ids=lb_completion_worker_ids,
+                lb_selected_worker_id=lb_selected_worker_id,
+                routed_via_latency_tracker=routed_via_latency_tracker,
+            )
+        )
 
     def _serve(
         self,
@@ -60,6 +73,9 @@ class InferencePool:
         worker_id: int,
         lb: LoadBalancer,
         latency_tracked: bool,
+        lb_completion_worker_ids: Optional[List[int]],
+        lb_selected_worker_id: Optional[int],
+        routed_via_latency_tracker: bool,
     ):
         resource = self.resources[worker_id]
         worker_spec = self.worker_specs[worker_id]
@@ -81,7 +97,11 @@ class InferencePool:
 
             t_done = self.env.now
             latency = t_done - request.t_arrival
-            lb.on_complete(worker_id)
+            completion_worker_ids = (
+                lb_completion_worker_ids if lb_completion_worker_ids is not None else [worker_id]
+            )
+            for completion_worker_id in completion_worker_ids:
+                lb.on_complete(completion_worker_id)
             self.global_inflight = max(0, self.global_inflight - 1)
             self.metrics.record_completion(
                 worker_id=worker_id,
@@ -109,6 +129,12 @@ class InferencePool:
                         "queue_len_on_dispatch": queue_len_on_dispatch,
                         "n_local_at_start": n_local,
                         "n_global_at_start": n_global,
+                        "lb_selected_worker_id": (
+                            lb_selected_worker_id
+                            if lb_selected_worker_id is not None
+                            else worker_id
+                        ),
+                        "routed_via_latency_tracker": routed_via_latency_tracker,
                         "latency_tracked": latency_tracked,
                         "service_time": service_time,
                         "latency": latency,
