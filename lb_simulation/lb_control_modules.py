@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class WrrLpControlParams:
-    update_every_samples: int
+    update_interval_seconds: float
     min_weight: float
     max_weight: float
     lp_balance_tolerance: float
@@ -102,6 +102,7 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         self.lp_updates = 0
         self.last_weights: List[float] = []
         self.latency_sampled_total = 0
+        self.next_update_time = max(1e-9, float(params.update_interval_seconds))
 
     def on_request_complete(
         self,
@@ -112,6 +113,7 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         lb: "LoadBalancer",
     ) -> None:
         self.completion_count += 1
+        completion_time = max(0.0, float(request.t_arrival) + float(latency))
         class_id = int(request.class_id)
         self.class_completions_window[class_id] += 1
 
@@ -133,7 +135,9 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         samples[worker_id] += 1
         self.latency_sampled_total += 1
 
-        self._maybe_update_weights(lb)
+        while completion_time + 1e-12 >= self.next_update_time:
+            self._maybe_update_weights(lb)
+            self.next_update_time += self.params.update_interval_seconds
 
     def _normalize_weights(self, worker_loads: Sequence[float]) -> List[float]:
         total = sum(max(0.0, float(value)) for value in worker_loads)
@@ -222,10 +226,6 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         return worker_loads
 
     def _maybe_update_weights(self, lb: "LoadBalancer") -> None:
-        if self.completion_count <= 0:
-            return
-        if self.completion_count % self.params.update_every_samples != 0:
-            return
         if not self.class_completions_window:
             return
         if self.params.lp_use_tracked_only and self.latency_sampled_total <= 0:
@@ -272,6 +272,7 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
             "wrr_lp_solver": "scipy_linprog",
             "wrr_lp_updates": self.lp_updates,
             "wrr_lp_sampled_observations": self.latency_sampled_total,
+            "wrr_lp_update_interval_seconds": self.params.update_interval_seconds,
         }
 
 

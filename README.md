@@ -302,7 +302,7 @@ Ví dụ:
   },
   "wrr": {
     "mode": "lp_latency",
-    "update_every_samples": 20,
+    "update_interval_seconds": 60.0,
     "min_weight": 0.2,
     "max_weight": 5.0,
     "lp_balance_tolerance": 0.25,
@@ -318,6 +318,7 @@ Ghi chú:
 - `wrr.weights` luôn được chuẩn hóa để tổng bằng `1.0` khi apply vào Load Balancer.
 - `wrr.mode` hỗ trợ: `none`, `lp_latency`.
 - `wrr.mode = lp_latency`: map sang load-balancer-control module `wrr_lp_latency`; module này ước lượng latency theo `class_id x worker`, giải LP để phân bổ tải theo class, rồi chuyển thành `worker_weights` cho `weighted_round_robin`.
+- `wrr.update_interval_seconds`: chu kỳ cập nhật weight theo thời gian mô phỏng (ví dụ `60.0` nghĩa là mỗi 1 phút mô phỏng cập nhật một lần).
 - `wrr.mode = lp_latency` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
 - `wrr.mode = lp_latency` bắt buộc cần `latency_tracker.enabled=true`.
 - `wrr.lp_balance_tolerance` điều khiển biên độ cân bằng tải mỗi worker quanh mức trung bình.

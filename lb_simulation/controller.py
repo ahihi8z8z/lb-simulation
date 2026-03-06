@@ -43,7 +43,7 @@ class WrrControlConfig:
 
     mode: str = "none"
     weights: Optional[List[float]] = None
-    update_every_samples: int = 20
+    update_interval_seconds: float = 60.0
     min_weight: float = 0.1
     max_weight: float = 10.0
     lp_balance_tolerance: float = 0.25
@@ -68,15 +68,6 @@ def _to_float(raw: object, key: str, default: float) -> float:
         return float(raw)
     except (TypeError, ValueError) as error:
         raise ValueError(f"Invalid float value for {key}: {raw}") from error
-
-
-def _to_int(raw: object, key: str, default: int) -> int:
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"Invalid int value for {key}: {raw}") from error
 
 
 def _to_bool_optional(raw: object, key: str, default: Optional[bool]) -> Optional[bool]:
@@ -135,6 +126,9 @@ def _parse_controller_payload(
 
     wrr_cfg_raw = payload.get("wrr")
     wrr_cfg_dict = wrr_cfg_raw if isinstance(wrr_cfg_raw, dict) else {}
+    interval_raw = wrr_cfg_dict.get("update_interval_seconds")
+    if interval_raw is None:
+        interval_raw = wrr_cfg_dict.get("update_every_samples")
     weights_raw = wrr_cfg_dict.get("weights")
     weights: Optional[List[float]] = None
     if weights_raw is not None:
@@ -150,12 +144,12 @@ def _parse_controller_payload(
     wrr_cfg = WrrControlConfig(
         mode=str(wrr_cfg_dict.get("mode", "none")).strip().lower() or "none",
         weights=weights,
-        update_every_samples=max(
-            1,
-            _to_int(
-                wrr_cfg_dict.get("update_every_samples"),
-                "wrr.update_every_samples",
-                20,
+        update_interval_seconds=max(
+            1e-6,
+            _to_float(
+                interval_raw,
+                "wrr.update_interval_seconds",
+                60.0,
             ),
         ),
         min_weight=max(
@@ -351,7 +345,7 @@ class LoadBalancerController:
                 "wrr_lp_latency",
                 num_workers=self.num_workers,
                 params=WrrLpControlParams(
-                    update_every_samples=self.config.wrr.update_every_samples,
+                    update_interval_seconds=self.config.wrr.update_interval_seconds,
                     min_weight=self.config.wrr.min_weight,
                     max_weight=self.config.wrr.max_weight,
                     lp_balance_tolerance=self.config.wrr.lp_balance_tolerance,
