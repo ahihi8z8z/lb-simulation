@@ -1,6 +1,6 @@
 # ⚡ LB Simulation (Event-Driven with SimPy)
 
-Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu LLM, theo thiết kế trong `design.md`.
+Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu LLM.
 
 ## 🎯 Mục tiêu
 - Đánh giá policy LB khi **không biết hidden job size**.
@@ -10,42 +10,13 @@ Mô phỏng **load balancing dựa trên latency feedback** cho workload kiểu 
   - global contention
 - Hỗ trợ traffic bursty và trace replay.
 
-## 🧱 Kiến trúc nhanh
-`TrafficGenerator -> LoadBalancer -> InferencePool (workers) -> Completion -> Controller`
-
-## 📦 Cấu trúc mã nguồn
-```text
-lb_simulation/
-  __init__.py
-  __main__.py
-  models.py
-  utils.py
-  metrics.py
-  controller.py
-  latency_tracker.py
-  lb_control_modules.py
-  logging_utils.py
-  latency_redirect_policies.py
-  load_balancer.py
-  lb_policies.py
-  inference_pool.py
-  workers.py
-  worker_models.py
-  traffic.py
-  request_csv_logger.py
-  runner.py
-configs/
-  service_classes.example.json
-  worker_classes.example.json
-  controller.example.json
-tools/
-  plot_detail_metrics.py
-  requirements.txt
-  README.md
-simulator.py               # CLI entrypoint mỏng
-design.md
-requirements.txt
-```
+## 📚 Tài liệu
+- Tài liệu tổng hợp: `docs/README.md`
+- Tổng quan kiến trúc: `docs/architecture_overview.md`
+- Flow chart request: `docs/request_flow_chart.md`
+- Biểu đồ luồng chi tiết: `docs/flow_diagrams.md`
+- Design chi tiết: `docs/design.md`
+- Tác dụng biến và class: `docs/variables_and_classes.md`
 
 ## 🚀 Cài đặt
 ```bash
@@ -101,23 +72,12 @@ CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
 - Điều khiển tham số policy (ví dụ: `worker_weights` của `weighted_round_robin`)
 - Theo dõi latency theo kiểu sampling một phần traffic
 
-Kiến trúc controller hiện tại tách thành 2 module:
-- `latency_tracker` module: sampling và EWMA latency.
-- `load_balancer_control` module: điều khiển tham số LB theo policy-control logic.
-  - Hiện có module `none` (no-op) và `wrr_lp_latency`.
+Tài liệu kiến trúc controller và luồng chi tiết nằm trong thư mục `docs/`.
 
-Mặc định (không truyền `--controller-config`) controller ở chế độ no-op:
-- Không điều khiển tham số policy
-- Không có latency tracker
-
-Latency tracking đã tách khỏi Load Balancer:
-- LB không tự học latency từ toàn bộ completion.
+Ghi chú vận hành quan trọng:
+- Mặc định (không truyền `--controller-config`) controller ở chế độ no-op.
 - Với policy cần latency (`peak_ewma`, `latency_only`) bắt buộc truyền `--controller-config` và set `latency_tracker.enabled=true`.
 - Với `weighted_round_robin` khi `wrr.mode = lp_latency`, cũng bắt buộc `latency_tracker.enabled=true`.
-- Latency tracker được mô hình như một worker đặc biệt: service time = 0, rồi forward request tới worker thật.
-- Controller gửi cho LB policy redirect để quyết định tỉ lệ request đi qua latency tracker.
-- Redirect policy có thể điều khiển cách forward (`round_robin` hoặc forward về đúng worker LB đã chọn).
-- Chỉ request đi qua latency tracker mới được dùng để cập nhật latency estimate.
 
 ## 📊 Metrics đầu ra
 - Mean / Median / P95 / P99 latency
@@ -326,11 +286,6 @@ Ghi chú:
 - `latency_tracker.redirect_policy` hiện có:
   - `fixed_rate`: redirect theo tỉ lệ `rate`, tracker forward theo round-robin.
   - `track_all`: quyết định worker trên LB thật trước, sau đó 100% request đi qua tracker và tracker forward xuống đúng worker LB đã chọn.
-
-Mở rộng thêm module điều khiển LB mới:
-1. Tạo class mới trong `lb_simulation/lb_control_modules.py` kế thừa `LoadBalancerControlModule`.
-2. Gắn `@register_load_balancer_control_module`.
-3. Instantiate module đó trong `LoadBalancerController` theo config mong muốn.
 
 ## 🧪 Dev quick check
 ```bash
