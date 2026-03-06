@@ -110,16 +110,14 @@ def plot_requests_over_time(
     arr_edges, arr_counts = _build_histogram_counts(arrivals, bin_size)
     done_edges, done_counts = _build_histogram_counts(completions, bin_size)
     max_time = max(max(arrivals), max(completions))
-    scale, axis_unit, bin_unit = _choose_time_scale(max_time)
+    scale, axis_unit, _ = _choose_time_scale(max_time)
 
     arr_x = [value / scale for value in arr_edges[:-1]]
     done_x = [value / scale for value in done_edges[:-1]]
-    scaled_bin = bin_size / scale
-
     fig, ax = plt.subplots(figsize=(11, 5))
     ax.step(arr_x, arr_counts, where="post", label="Arrivals", linewidth=1.8)
     ax.step(done_x, done_counts, where="post", label="Completions", linewidth=1.8)
-    ax.set_title(f"Requests Over Time (bin={scaled_bin:.2f} {bin_unit})")
+    ax.set_title(f"Requests Over Time (bin={bin_size:g} s)")
     ax.set_xlabel(f"Simulation time ({axis_unit})")
     ax.set_ylabel("Requests / bin")
     ax.grid(True, alpha=0.25)
@@ -140,8 +138,7 @@ def plot_requests_over_time_by_class(
         return
     all_arrivals = [value for values in arrivals_by_class.values() for value in values]
     max_time = max(all_arrivals) if all_arrivals else 0.0
-    scale, axis_unit, bin_unit = _choose_time_scale(max_time)
-    scaled_bin = bin_size / scale
+    scale, axis_unit, _ = _choose_time_scale(max_time)
 
     fig, axes = plt.subplots(
         len(class_ids),
@@ -170,7 +167,7 @@ def plot_requests_over_time_by_class(
         ax.legend()
 
     axes[-1].set_xlabel(f"Simulation time ({axis_unit})")
-    fig.suptitle(f"Requests Over Time By Service Class (bin={scaled_bin:.2f} {bin_unit})")
+    fig.suptitle(f"Requests Over Time By Service Class (bin={bin_size:g} s)")
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
