@@ -34,6 +34,7 @@ class ServiceClassTrafficSpec:
     arrival_mode: str
     model: str = "modeled"
     log_type: str = "modeled_gamma"
+    trace_traffic_scale: int = 1
     zipf_s: float = 1.20
     zipf_xmin: int = 16
     zipf_max: int = 2048
@@ -54,6 +55,7 @@ class TrafficGenerator:
         on_request: Callable[[Request], None],
         rng: Optional[random.Random] = None,
         service_classes: int = 1,
+        trace_traffic_scale: int = 1,
         zipf_s: float = 1.20,
         zipf_xmin: int = 16,
         zipf_max: int = 2048,
@@ -72,6 +74,7 @@ class TrafficGenerator:
         self.on_request = on_request
         self.rng = rng or random.Random()
         self.service_classes = max(1, service_classes)
+        self.trace_traffic_scale = max(1, int(trace_traffic_scale))
 
         self.zipf_s = zipf_s
         self.zipf_xmin = zipf_xmin
@@ -87,10 +90,11 @@ class TrafficGenerator:
         self.next_rid = next_rid
         self._rid = 0
         logger.info(
-            "TrafficGenerator initialized mode=%s t_end=%.3f class_id=%s",
+            "TrafficGenerator initialized mode=%s t_end=%.3f class_id=%s trace_scale=%d",
             self.arrival_mode,
             self.t_end,
             self.fixed_class_id,
+            self.trace_traffic_scale,
         )
 
     def _sample_request_length(self) -> int:
@@ -171,13 +175,14 @@ class TrafficGenerator:
             if delta > 0:
                 yield self.env.timeout(delta)
             last_t = record.timestamp
-            self.on_request(
-                self._build_request(
-                    job_size=record.total_tokens,
-                    model=record.model,
-                    log_type=record.log_type,
+            for _ in range(self.trace_traffic_scale):
+                self.on_request(
+                    self._build_request(
+                        job_size=record.total_tokens,
+                        model=record.model,
+                        log_type=record.log_type,
+                    )
                 )
-            )
 
     def _run_modeled_gamma(self):
         while self.env.now < self.t_end:
@@ -395,6 +400,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
           "model": "GPT-4",
           "log_type": "Conversation log",
           "trace_file": "traces/class0.csv",
+          "traffic_scale": 3,
           "gamma_windows": [{"window_end": 1200, "alpha": 2.5, "beta": 0.3}],
           "gamma": {"alpha": 2.5, "beta": 0.3, "window_size": 1200},
           "zipf": {"s": 1.2, "xmin": 16, "max": 2048},
@@ -431,6 +437,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         arrival_mode = str(item.get("arrival_mode", "modeled_gamma")).strip().lower()
         model = str(item.get("model", "modeled")).strip() or "modeled"
         log_type = str(item.get("log_type", "modeled_gamma")).strip() or "modeled_gamma"
+        trace_traffic_scale = 1
 
         zipf_s = 1.20
         zipf_xmin = 16
@@ -442,6 +449,11 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         gamma_windows: List[Tuple[float, float, float]] = []
 
         if arrival_mode == "trace_replay":
+            trace_traffic_scale = int(item.get("traffic_scale", 1))
+            if trace_traffic_scale <= 0:
+                raise ValueError(
+                    f"classes[{idx}].traffic_scale must be a positive integer."
+                )
             if item.get("zipf") is not None:
                 raise ValueError(
                     f"classes[{idx}] must not set 'zipf' when arrival_mode='trace_replay'."
@@ -493,6 +505,10 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                 )
 
         elif arrival_mode == "modeled_gamma":
+            if item.get("traffic_scale") is not None:
+                raise ValueError(
+                    f"classes[{idx}] must not set 'traffic_scale' when arrival_mode='modeled_gamma'."
+                )
             zipf_cfg = item.get("zipf", {})
             if zipf_cfg is None:
                 zipf_cfg = {}
@@ -548,6 +564,7 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                 arrival_mode=arrival_mode,
                 model=model,
                 log_type=log_type,
+                trace_traffic_scale=trace_traffic_scale,
                 zipf_s=zipf_s,
                 zipf_xmin=zipf_xmin,
                 zipf_max=zipf_max,

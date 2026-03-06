@@ -289,6 +289,7 @@ def run_simulation(
                 on_request=on_arrival,
                 rng=class_rng,
                 service_classes=1,
+                trace_traffic_scale=spec.trace_traffic_scale,
                 zipf_s=spec.zipf_s,
                 zipf_xmin=spec.zipf_xmin,
                 zipf_max=spec.zipf_max,

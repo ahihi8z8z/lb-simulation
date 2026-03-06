@@ -162,6 +162,8 @@ Khi dùng `--service-class-config`, mỗi class có thể tự chọn:
 - `trace_replay`: trỏ tới `trace_file`, `job_size` lấy trực tiếp từ cột `Total tokens`
 - `modeled_gamma`: dùng `gamma_windows` hoặc `gamma` cố định cho inter-arrival
 - Có thể set mặc định `model` và `log_type` cho class (đặc biệt hữu ích với `modeled_gamma`)
+- Với `trace_replay`, có thể set `traffic_scale` (số nguyên dương, mặc định `1`) để nhân số request tại cùng timestamp.
+  Ví dụ: một record tại `t=5s` và `traffic_scale=3` sẽ sinh 3 request cùng lúc tại `5s`.
 - Với `modeled_gamma`, `job_size` được sinh theo:
   - `request_length ~ Zipf(s, xmin, max)` từ cấu hình `zipf`
   - `response_length = slope * request_length + intercept` từ `response_linear`
@@ -196,7 +198,8 @@ Ví dụ:
       "arrival_mode": "trace_replay",
       "model": "ChatGPT",
       "log_type": "Conversation log",
-      "trace_file": "../traces/BurstGPT_without_fails_1.csv"
+      "trace_file": "../traces/BurstGPT_without_fails_1.csv",
+      "traffic_scale": 3
     },
     {
       "class_id": 1,
@@ -218,6 +221,7 @@ Ví dụ:
 Ghi chú:
 - `trace_file` có thể là path tuyệt đối hoặc path tương đối theo thư mục chứa file config.
 - `trace_replay` không nhận cấu hình `zipf`/`response_linear`.
+- `modeled_gamma` không nhận cấu hình `traffic_scale`.
 - `--service-class-config` là option bắt buộc.
 
 ## 🧩 Worker class config (JSON)

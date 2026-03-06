@@ -5,7 +5,8 @@
       "arrival_mode": "trace_replay",
       "model": "ChatGPT",
       "log_type": "Conversation log",
-      "trace_file": "../traces/BurstGPT_without_fails_1.csv"
+      "trace_file": "../traces/BurstGPT_without_fails_1.csv",
+      "traffic_scale": 1
     },
     {
       "class_id": 1,
