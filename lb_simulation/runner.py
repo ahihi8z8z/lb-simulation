@@ -6,6 +6,7 @@ import logging
 import random
 import re
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -101,6 +102,7 @@ def run_simulation(
     logs_root: Path = Path("logs"),
 ) -> Dict[str, object]:
     """Run one simulation and return aggregate metrics."""
+    wall_clock_start = time.perf_counter()
 
     if service_class_config is None:
         raise ValueError("service_class_config is required.")
@@ -290,6 +292,8 @@ def run_simulation(
                 zipf_s=spec.zipf_s,
                 zipf_xmin=spec.zipf_xmin,
                 zipf_max=spec.zipf_max,
+                response_slope=spec.response_slope,
+                response_intercept=spec.response_intercept,
                 gamma_windows=spec.gamma_windows,
                 trace_records=spec.trace_records,
                 model=spec.model,
@@ -309,6 +313,7 @@ def run_simulation(
             detail_writer.close()
 
     summary = metrics.summarize(sim_time=env.now, active_time=t_end)
+    summary["wall_time_total"] = time.perf_counter() - wall_clock_start
     summary["sim_time_total"] = env.now
     summary["drain_time"] = max(0.0, env.now - t_end)
     summary["policy"] = policy
@@ -336,10 +341,11 @@ def run_simulation(
     summary["summary_file"] = str(summary_file)
     _write_json(summary_file, summary)
     logger.info(
-        "Simulation completed dispatched=%s completed=%s mean_latency=%.4f",
+        "Simulation completed dispatched=%s completed=%s mean_latency=%.4f wall_time=%.3fs",
         summary["dispatched"],
         summary["completed"],
         summary["mean_latency"],
+        summary["wall_time_total"],
     )
     return summary
 
@@ -425,6 +431,7 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"avg global inflight   : {summary['avg_global_inflight']:.4f}")
     print(f"avg utilization       : {summary['avg_utilization']:.4f}")
     print(f"sim time total (s)    : {summary['sim_time_total']:.4f}")
+    print(f"wall time total (s)   : {summary.get('wall_time_total', 0.0):.4f}")
     print(f"drain time (s)        : {summary['drain_time']:.4f}")
     print(f"detail enabled        : {summary['detail_enabled']}")
     if summary["detail_enabled"]:

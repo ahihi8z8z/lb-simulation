@@ -159,9 +159,13 @@ CSV columns:
 
 ## 🧩 Service class config (JSON)
 Khi dùng `--service-class-config`, mỗi class có thể tự chọn:
-- `trace_replay`: trỏ tới `trace_file`
-- `modeled_gamma`: dùng `gamma_windows` hoặc `gamma` cố định
+- `trace_replay`: trỏ tới `trace_file`, `job_size` lấy trực tiếp từ cột `Total tokens`
+- `modeled_gamma`: dùng `gamma_windows` hoặc `gamma` cố định cho inter-arrival
 - Có thể set mặc định `model` và `log_type` cho class (đặc biệt hữu ích với `modeled_gamma`)
+- Với `modeled_gamma`, `job_size` được sinh theo:
+  - `request_length ~ Zipf(s, xmin, max)` từ cấu hình `zipf`
+  - `response_length = slope * request_length + intercept` từ `response_linear`
+  - `job_size = request_length + response_length`
 
 ### Trace CSV schema (trace_replay)
 File trace được đọc theo header:
@@ -192,8 +196,7 @@ Ví dụ:
       "arrival_mode": "trace_replay",
       "model": "ChatGPT",
       "log_type": "Conversation log",
-      "trace_file": "../traces/BurstGPT_without_fails_1.csv",
-      "zipf": { "s": 1.2, "xmin": 16, "max": 2048 }
+      "trace_file": "../traces/BurstGPT_without_fails_1.csv"
     },
     {
       "class_id": 1,
@@ -204,7 +207,9 @@ Ví dụ:
         { "window_end": 300, "alpha": 1.8, "beta": 0.9 },
         { "window_end": 900, "alpha": 2.4, "beta": 0.45 },
         { "window_end": 1800, "alpha": 1.6, "beta": 1.1 }
-      ]
+      ],
+      "zipf": { "s": 1.3, "xmin": 32, "max": 4096 },
+      "response_linear": { "slope": 0.7, "intercept": 32.0 }
     }
   ]
 }
@@ -212,6 +217,7 @@ Ví dụ:
 
 Ghi chú:
 - `trace_file` có thể là path tuyệt đối hoặc path tương đối theo thư mục chứa file config.
+- `trace_replay` không nhận cấu hình `zipf`/`response_linear`.
 - `--service-class-config` là option bắt buộc.
 
 ## 🧩 Worker class config (JSON)

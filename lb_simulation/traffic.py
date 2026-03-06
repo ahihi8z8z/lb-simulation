@@ -37,6 +37,8 @@ class ServiceClassTrafficSpec:
     zipf_s: float = 1.20
     zipf_xmin: int = 16
     zipf_max: int = 2048
+    response_slope: float = 1.0
+    response_intercept: float = 0.0
     gamma_windows: List[Tuple[float, float, float]] = field(default_factory=list)
     trace_records: List[TraceRecord] = field(default_factory=list)
 
@@ -55,6 +57,8 @@ class TrafficGenerator:
         zipf_s: float = 1.20,
         zipf_xmin: int = 16,
         zipf_max: int = 2048,
+        response_slope: float = 1.0,
+        response_intercept: float = 0.0,
         gamma_windows: Optional[List[Tuple[float, float, float]]] = None,
         trace_records: Optional[List[TraceRecord]] = None,
         model: str = "modeled",
@@ -72,6 +76,8 @@ class TrafficGenerator:
         self.zipf_s = zipf_s
         self.zipf_xmin = zipf_xmin
         self.zipf_max = zipf_max
+        self.response_slope = response_slope
+        self.response_intercept = response_intercept
 
         self.gamma_windows = gamma_windows or []
         self.trace_records = trace_records or []
@@ -87,11 +93,17 @@ class TrafficGenerator:
             self.fixed_class_id,
         )
 
-    def _sample_job_size(self) -> int:
+    def _sample_request_length(self) -> int:
         # Inverse transform sampling for a truncated discrete Zipf-like distribution.
         u = self.rng.random()
         x = int(self.zipf_xmin * ((1.0 - u) ** (-1.0 / max(1e-6, self.zipf_s - 1.0))))
         return min(max(self.zipf_xmin, x), self.zipf_max)
+
+    def _sample_modeled_gamma_job_size(self) -> int:
+        request_length = self._sample_request_length()
+        response_length = int(round(self.response_slope * request_length + self.response_intercept))
+        response_length = max(0, response_length)
+        return request_length + response_length
 
     def _sample_class_id(self) -> int:
         if self.fixed_class_id is not None:
@@ -109,7 +121,11 @@ class TrafficGenerator:
             rid=rid,
             t_arrival=self.env.now,
             class_id=self._sample_class_id(),
-            job_size=job_size if job_size is not None else self._sample_job_size(),
+            job_size=(
+                job_size
+                if job_size is not None
+                else self._sample_modeled_gamma_job_size()
+            ),
             model=model if model is not None else self.model,
             log_type=log_type if log_type is not None else self.log_type,
         )
@@ -381,7 +397,8 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
           "trace_file": "traces/class0.csv",
           "gamma_windows": [{"window_end": 1200, "alpha": 2.5, "beta": 0.3}],
           "gamma": {"alpha": 2.5, "beta": 0.3, "window_size": 1200},
-          "zipf": {"s": 1.2, "xmin": 16, "max": 2048}
+          "zipf": {"s": 1.2, "xmin": 16, "max": 2048},
+          "response_linear": {"slope": 0.7, "intercept": 32.0}
         }
       ]
     }
@@ -415,20 +432,24 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
         model = str(item.get("model", "modeled")).strip() or "modeled"
         log_type = str(item.get("log_type", "modeled_gamma")).strip() or "modeled_gamma"
 
-        zipf_cfg = item.get("zipf", {})
-        if zipf_cfg is None:
-            zipf_cfg = {}
-        if not isinstance(zipf_cfg, dict):
-            raise ValueError(f"classes[{idx}].zipf must be an object.")
-
-        zipf_s = float(zipf_cfg.get("s", 1.20))
-        zipf_xmin = int(zipf_cfg.get("xmin", 16))
-        zipf_max = int(zipf_cfg.get("max", 2048))
+        zipf_s = 1.20
+        zipf_xmin = 16
+        zipf_max = 2048
+        response_slope = 1.0
+        response_intercept = 0.0
 
         trace_records: List[TraceRecord] = []
         gamma_windows: List[Tuple[float, float, float]] = []
 
         if arrival_mode == "trace_replay":
+            if item.get("zipf") is not None:
+                raise ValueError(
+                    f"classes[{idx}] must not set 'zipf' when arrival_mode='trace_replay'."
+                )
+            if item.get("response_linear") is not None:
+                raise ValueError(
+                    f"classes[{idx}] must not set 'response_linear' when arrival_mode='trace_replay'."
+                )
             trace_file = item.get("trace_file")
             if not trace_file:
                 raise ValueError(
@@ -472,6 +493,30 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                 )
 
         elif arrival_mode == "modeled_gamma":
+            zipf_cfg = item.get("zipf", {})
+            if zipf_cfg is None:
+                zipf_cfg = {}
+            if not isinstance(zipf_cfg, dict):
+                raise ValueError(f"classes[{idx}].zipf must be an object.")
+
+            zipf_s = float(zipf_cfg.get("s", 1.20))
+            zipf_xmin = int(zipf_cfg.get("xmin", 16))
+            zipf_max = int(zipf_cfg.get("max", 2048))
+            if zipf_xmin <= 0:
+                raise ValueError(f"classes[{idx}].zipf.xmin must be > 0.")
+            if zipf_max < zipf_xmin:
+                raise ValueError(f"classes[{idx}].zipf.max must be >= zipf.xmin.")
+
+            response_cfg = item.get("response_linear", {})
+            if response_cfg is None:
+                response_cfg = {}
+            if not isinstance(response_cfg, dict):
+                raise ValueError(f"classes[{idx}].response_linear must be an object.")
+            response_slope = float(response_cfg.get("slope", 1.0))
+            response_intercept = float(response_cfg.get("intercept", 0.0))
+            if response_slope < 0:
+                raise ValueError(f"classes[{idx}].response_linear.slope must be >= 0.")
+
             if item.get("gamma_windows") is not None:
                 gamma_windows = _parse_gamma_windows(item["gamma_windows"])
             elif isinstance(item.get("gamma"), dict):
@@ -506,6 +551,8 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                 zipf_s=zipf_s,
                 zipf_xmin=zipf_xmin,
                 zipf_max=zipf_max,
+                response_slope=response_slope,
+                response_intercept=response_intercept,
                 gamma_windows=gamma_windows,
                 trace_records=trace_records,
             )
