@@ -237,7 +237,23 @@ def run_simulation(
         rng=rng,
     )
 
+    def _build_detail_state() -> Optional[Dict[str, object]]:
+        if not detail:
+            return None
+        lb_state = {
+            "inflight": list(load_balancer.inflight),
+            "lat_ewma": list(load_balancer.lat_ewma),
+            "worker_weights": list(load_balancer.worker_weights),
+            "penalty": list(load_balancer.penalty),
+            "feedback_count": list(load_balancer.feedback_count),
+        }
+        lb_control_state: Dict[str, object] = {}
+        if controller.lb_control_module is not None and controller.lb_control_module.name != "none":
+            lb_control_state = controller.lb_control_module.summarize(load_balancer)
+        return {"lb_state": lb_state, "lb_control_state": lb_control_state}
+
     def on_arrival(request: Request) -> None:
+        detail_state = _build_detail_state()
         lb_selected_worker_id = load_balancer.choose_worker(request)
         if controller.is_latency_tracker_worker(lb_selected_worker_id):
             # The latency-tracker worker itself has zero service time and only forwards
@@ -264,6 +280,7 @@ def run_simulation(
                     else lb_selected_worker_id
                 ),
                 routed_via_latency_tracker=True,
+                detail_state=detail_state,
             )
             logger.debug(
                 "Request rid=%d routed via tracker -> worker=%d",
@@ -281,6 +298,7 @@ def run_simulation(
             lb_completion_worker_ids=[lb_selected_worker_id],
             lb_selected_worker_id=lb_selected_worker_id,
             routed_via_latency_tracker=False,
+            detail_state=detail_state,
         )
         logger.debug(
             "Request rid=%d routed directly -> worker=%d",

@@ -1,5 +1,6 @@
 """Worker pool and service-time model."""
 
+import json
 import logging
 import random
 from typing import Callable, Dict, List, Optional
@@ -57,7 +58,14 @@ class InferencePool:
         lb_completion_worker_ids: Optional[List[int]] = None,
         lb_selected_worker_id: Optional[int] = None,
         routed_via_latency_tracker: bool = False,
+        detail_state: Optional[Dict[str, object]] = None,
     ) -> None:
+        if detail_state is not None:
+            # Snapshot queue lengths before entering service.
+            detail_state["queue_snapshot"] = [
+                len(resource.queue) + resource.count for resource in self.resources
+            ]
+
         self.global_inflight += 1
         logger.debug(
             "Dispatch request rid=%d worker=%d tracked=%s global_inflight=%d",
@@ -75,6 +83,7 @@ class InferencePool:
                 lb_completion_worker_ids=lb_completion_worker_ids,
                 lb_selected_worker_id=lb_selected_worker_id,
                 routed_via_latency_tracker=routed_via_latency_tracker,
+                detail_state=detail_state,
             )
         )
 
@@ -87,6 +96,7 @@ class InferencePool:
         lb_completion_worker_ids: Optional[List[int]],
         lb_selected_worker_id: Optional[int],
         routed_via_latency_tracker: bool,
+        detail_state: Optional[Dict[str, object]],
     ):
         resource = self.resources[worker_id]
         worker_spec = self.worker_specs[worker_id]
@@ -131,6 +141,19 @@ class InferencePool:
             )
 
             if self.on_request_done:
+                lb_state_json = None
+                lb_control_state_json = None
+                queue_snapshot = None
+                if detail_state is not None:
+                    if "lb_state" in detail_state:
+                        lb_state_json = json.dumps(detail_state["lb_state"], separators=(",", ":"))
+                    if "lb_control_state" in detail_state:
+                        lb_control_state_json = json.dumps(
+                            detail_state["lb_control_state"], separators=(",", ":")
+                        )
+                    if "queue_snapshot" in detail_state:
+                        queue_snapshot = json.dumps(detail_state["queue_snapshot"])
+
                 self.on_request_done(
                     {
                         "rid": request.rid,
@@ -156,5 +179,8 @@ class InferencePool:
                         "latency_tracked": latency_tracked,
                         "service_time": service_time,
                         "latency": latency,
+                        "lb_state": lb_state_json,
+                        "lb_control_state": lb_control_state_json,
+                        "queue_snapshot": queue_snapshot,
                     }
                 )

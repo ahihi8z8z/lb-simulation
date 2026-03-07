@@ -31,6 +31,9 @@ class RequestCsvLogger:
         "latency_tracked",
         "service_time",
         "latency",
+        "lb_state",
+        "lb_control_state",
+        "queue_snapshot",
     ]
 
     def __init__(self, path: Path) -> None:
