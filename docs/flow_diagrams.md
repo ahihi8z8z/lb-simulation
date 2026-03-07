@@ -54,3 +54,7 @@ flowchart TD
     J --> K["lb.set_worker_weights"]
     K --> L["next_update_time += update_interval_seconds"]
 ```
+
+## Xem thêm
+- Flow tổng quan: [request_flow_chart](request_flow_chart.md)
+- Thuật toán control: [algorithms/load_balancer_control](algorithms/load_balancer_control.md)

@@ -72,3 +72,5 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
   - `weights`: vector weight sau normalize/clip/smoothing.
   - `self.params.min_weight`, `self.params.max_weight`: biên clip.
   - `self.params.lp_weight_ema_decay`: hệ số làm mượt.
+
+Quay lại: [algorithms index](README.md) · [docs/README](../README.md)

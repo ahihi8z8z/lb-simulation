@@ -52,3 +52,5 @@ Các model đều implement `sample_service_time(context, rng)` với:
   - `context.job_size`: input để tính `denominator`.
   - `self.a`, `self.b`, `self.min_s`, `self.max_s`: tham số model.
   - `denominator`: giá trị sau khi clip, dùng để tính `1.0 / denominator`.
+
+Quay lại: [algorithms index](README.md) · [docs/README](../README.md)

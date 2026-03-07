@@ -62,3 +62,5 @@ Nguồn implementation: `lb_simulation/lb_policies.py`.
   - `lb.penalty`: phần phạt bổ sung theo worker.
   - `lb.feedback_count`: số feedback đã nhận (để giảm bonus dần).
   - `scores`: danh sách score cuối cùng đưa vào `lb.argmin_score`.
+
+Quay lại: [algorithms index](README.md) · [docs/README](../README.md)

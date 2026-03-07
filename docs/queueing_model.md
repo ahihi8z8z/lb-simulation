@@ -44,3 +44,5 @@
 ## Ghi chú về phân tích lý thuyết
 - Vì routing và service time đều phụ thuộc trạng thái, mô hình khó có nghiệm đóng.
 - Simulator phù hợp cho đánh giá thực nghiệm (what-if, sensitivity) hơn là closed-form analysis.
+
+Xem thêm: [architecture_overview](architecture_overview.md) · [algorithms/load_balancer](algorithms/load_balancer.md) · [algorithms/load_balancer_control](algorithms/load_balancer_control.md)

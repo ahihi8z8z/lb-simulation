@@ -40,3 +40,8 @@
 ## Queueing model
 - Mô tả chi tiết dưới góc nhìn hàng đợi nằm trong `queueing_model.md`.
 - Ở mức kiến trúc: hệ thống là nhiều queue song song (`G/G/1` mỗi worker) với router động và vòng feedback từ controller.
+
+## Xem thêm
+- Luồng chi tiết: [request_flow_chart](request_flow_chart.md), [flow_diagrams](flow_diagrams.md)
+- Thuật toán: [algorithms index](algorithms/README.md)
+- Queueing view: [queueing_model](queueing_model.md)
