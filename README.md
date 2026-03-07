@@ -237,6 +237,13 @@ Ví dụ:
       "count": 1,
       "service_model": "fixed",
       "params": { "service_time": 0.08 }
+    },
+    {
+      "class_id": 3,
+      "description": "Worker fixed_linear để mô hình throughput tuyến tính theo job_size",
+      "count": 1,
+      "service_model": "fixed_linear",
+      "params": { "a": 0.03, "b": 0.002, "min": 0.001, "max": 5.0 }
     }
   ]
 }
