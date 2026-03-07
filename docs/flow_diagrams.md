@@ -5,7 +5,7 @@
 ```mermaid
 sequenceDiagram
     participant TG as TrafficGenerator
-    participant LB as LoadBalancer
+    participant LB as LoadBalancer[class_id]
     participant IP as InferencePool
     participant C as Controller
     TG->>LB: choose_worker(request)
@@ -21,9 +21,9 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant TG as TrafficGenerator
-    participant LB as LoadBalancer
+    participant LB as LoadBalancer[class_id]
     participant C as Controller
-    participant LT as LatencyTrackerWorker
+    participant LT as LatencyTrackerWorker[class_id]
     participant IP as InferencePool
     TG->>LB: choose_worker(request)
     LB->>LB: should_redirect? yes
@@ -34,7 +34,7 @@ sequenceDiagram
     IP->>LB: on_complete(real_worker + tracker_worker)
     IP->>C: on_request_complete(..., tracked=true)
     C->>LT: observe(worker_id, latency)
-    C->>LB: set_latency_estimate(...)
+    C->>LB: set_latency_estimate(...) cho class hiện tại
     C->>C: lb_control_module.on_request_complete
 ```
 
@@ -48,10 +48,9 @@ flowchart TD
     D -- Không --> E["Chờ completion tiếp theo"]
     D -- Có --> F["_maybe_update_weights"]
     F --> G["Build cost_by_class từ latency estimate"]
-    G --> H["Giải LP bằng scipy.optimize.linprog"]
-    H --> I["worker_loads"]
-    I --> J["normalize + clip + EMA decay"]
-    J --> K["lb.set_worker_weights"]
+    G --> H["Giải LP bằng scipy.optimize.linprog<br/>(allocation matrix class x worker)"]
+    H --> I["Lặp theo từng class: normalize + clip row"]
+    I --> K["Apply vào LB[class_id].set_worker_weights"]
     K --> L["next_update_time += update_interval_seconds"]
 ```
 

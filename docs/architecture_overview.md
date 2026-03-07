@@ -1,24 +1,25 @@
 # Tổng Quan Kiến Trúc
 
 ## Pipeline chính
-`TrafficGenerator -> LoadBalancer -> InferencePool -> Completion Callback -> Controller`
+`TrafficGenerator(class_id) -> LoadBalancer[class_id] -> InferencePool -> Completion Callback -> Controller`
 
 ## Thành phần và vai trò
 - `lb_simulation/traffic.py`
   - Sinh request theo `trace_replay` hoặc `modeled_gamma`.
   - Đẩy request sang callback `on_arrival`.
 - `lb_simulation/load_balancer.py`
-  - Giữ state LB runtime: `inflight`, `lat_ewma`, `worker_weights`, ...
+  - Mỗi service class có một instance `LoadBalancer` riêng.
+  - Giữ state LB runtime theo class: `inflight`, `lat_ewma`, `worker_weights`, ...
   - Gọi policy tương ứng trong `lb_policies.py` để chọn worker.
-  - Có cơ chế redirect request qua latency tracker.
+  - Có cơ chế redirect request qua latency tracker của chính class đó.
 - `lb_simulation/inference_pool.py`
   - Mô hình pool worker (SimPy Resource capacity=1/worker).
   - Tính service time theo `worker_models.py`.
   - Ghi metrics, gọi callback completion.
 - `lb_simulation/controller.py`
   - Lắp 2 module:
-  - `latency_tracker`: thu mẫu latency, EWMA.
-  - `lb_control_module`: điều khiển tham số LB (ví dụ WRR LP latency).
+  - `latency_trackers_by_class`: thu mẫu latency, EWMA theo từng class.
+  - `lb_control_module`: điều khiển tham số cho toàn bộ LB (ví dụ WRR LP latency).
 - `lb_simulation/lb_control_modules.py`
   - Module điều khiển LB có thể cắm thêm bằng registry.
   - Hiện có `none` và `wrr_lp_latency`.
@@ -31,6 +32,8 @@
 
 ## Invariants quan trọng
 - `LoadBalancer.worker_weights` luôn được chuẩn hóa tổng bằng `1.0`.
+- Mỗi class có LB riêng (`lb_id=class_<class_id>`).
+- Khi bật tracker: mỗi class có tracker state riêng, không dùng chung EWMA giữa các class.
 - `wrr.mode=lp_latency` yêu cầu:
   - policy LB là `weighted_round_robin`.
   - `latency_tracker.enabled=true`.

@@ -2,8 +2,8 @@
 
 ## Mapping thành phần sang queueing model
 - Mỗi worker trong `InferencePool` là một server đơn (`capacity=1`), tương ứng hàng đợi `G/G/1`.
-- Toàn cụm worker là hệ `N` queue song song, có router ở trước:
-  - Router = `LoadBalancer` policy.
+- Toàn cụm worker là hệ `N` queue song song, có bank router ở trước:
+  - Router = `LoadBalancer[class_id]` (mỗi service class một LB instance).
   - Arrival stream = hợp của các luồng service class từ `TrafficGenerator`.
 
 ## Arrival process
@@ -19,14 +19,14 @@
 - Do đó phù hợp nhất khi nhìn như state-dependent queueing network thay vì M/M/1 cổ điển.
 
 ## Routing discipline
-- Routing động theo policy:
+- Routing động theo policy trên từng LB class:
   - `random`, `round_robin`, `weighted_round_robin`, `least_inflight`, `latency_only`.
 - `weighted_round_robin` với control module tạo closed-loop:
-  - Completion -> latency estimate/control -> cập nhật `worker_weights` -> đổi routing.
+  - Completion -> latency estimate/control -> cập nhật `worker_weights` theo từng class -> đổi routing.
 
 ## Latency tracker trong queueing view
-- Tracker có thể xem như một nút quan sát (measurement node), không phải server thực phục vụ request.
-- Request qua tracker vẫn được phục vụ ở worker thật; tracker dùng để lấy sample latency có kiểm soát.
+- Mỗi class có một tracker node riêng (measurement node), không phải server thực phục vụ request.
+- Request qua tracker vẫn được phục vụ ở worker thật; tracker của class đó dùng để lấy sample latency có kiểm soát.
 
 ## Controller như feedback control trong queueing network
 - Forward path: arrival -> routing -> queue -> service -> completion.

@@ -26,6 +26,7 @@
 | `inflight` | `List[int]` | Số request đang xử lý theo worker. |
 | `feedback_count` | `List[int]` | Số sample latency đã nhận theo worker. |
 | `worker_weights` | `List[float]` | Trọng số runtime cho WRR; luôn được normalize tổng = 1. |
+| `lb_id` | `str` | Định danh LB instance (ví dụ `class_0`, `class_1`). |
 | `latency_tracker_worker_id` | `Optional[int]` | Worker id ảo đại diện latency tracker (nếu bật). |
 | `_redirect_target_by_rid` | `Dict[int, int]` | Map `request_id -> selected_worker` khi request bị redirect qua tracker. |
 
@@ -35,7 +36,8 @@
 | `policy` | `str` | Policy LB đang chạy (lowercase). |
 | `tracker_worker_id` | `int` | `num_workers` (id kế sau worker thật), dành cho tracker. |
 | `latency_tracker_enabled` | `bool` | Bật/tắt tracker theo config đã validate. |
-| `latency_tracker` | `Optional[LatencyTrackerWorker]` | Instance `LatencyTrackerWorker` hoặc `None`. |
+| `class_load_balancers` | `Dict[int, LoadBalancer]` | Map `class_id -> LB` (mỗi class một LB). |
+| `latency_trackers_by_class` | `Dict[int, LatencyTrackerWorker]` | Map `class_id -> tracker` (mỗi class một tracker state riêng). |
 | `lb_control_module` | `LoadBalancerControlModule` | Module điều khiển LB đang dùng (`none` hoặc `wrr_lp_latency`). |
 
 ### `LatencyTrackerWorker`
@@ -53,11 +55,14 @@
 | Biến | Kiểu | Ý nghĩa |
 |---|---|---|
 | `params` | `WrrLpControlParams` | Bộ tham số LP/weight update (`WrrLpControlParams`). |
-| `class_latency_estimates` | `Dict[int, List[float]]` | Ma trận EWMA latency theo `class_id x worker`. |
-| `class_latency_samples` | `Dict[int, List[int]]` | Số mẫu tương ứng theo `class_id x worker`. |
+| `class_load_balancers` | `Dict[int, LoadBalancer]` | LB map theo class mà module đang điều khiển. |
+| `class_latency_estimates` | `Dict[int, np.ndarray]` | Ma trận EWMA latency theo `class_id x worker`. |
+| `class_latency_samples` | `Dict[int, np.ndarray]` | Số mẫu tương ứng theo `class_id x worker`. |
 | `class_completions_window` | `Dict[int, int]` | Demand theo class trong cửa sổ update hiện tại. |
 | `next_update_time` | `float` | Mốc thời gian mô phỏng lần update kế tiếp. |
 | `lp_updates` | `int` | Số lần LP update thành công. |
+| `last_lp_class_order` | `List[int]` | Thứ tự class của lần solve LP gần nhất. |
+| `last_lp_weight_matrix` | `List[List[float]]` | Ma trận weight đã apply theo thứ tự class ở trên. |
 
 ### `InferencePool`
 | Biến | Kiểu | Ý nghĩa |

@@ -19,6 +19,7 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
   - dùng `scipy.optimize.linprog` (không có fallback heuristic).
 
 ### Dữ liệu module duy trì
+- `class_load_balancers[class_id]`: map class -> LB instance.
 - `class_latency_estimates[class_id][worker]`: EWMA latency theo class-worker.
 - `class_completions_window[class_id]`: demand theo class trong cửa sổ hiện tại.
 - `next_update_time`: mốc cập nhật kế tiếp theo giây mô phỏng.
@@ -26,6 +27,8 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
   - `class_latency_samples[class_id][worker]`: đếm số sample latency theo class-worker.
   - `latency_sampled_total`: tổng số sample đã dùng cho module.
   - `lp_updates`: số lần update weight thành công.
+  - `last_lp_class_order`: thứ tự class trong lần solve LP gần nhất.
+  - `last_lp_weight_matrix`: ma trận weight sau normalize/clip theo từng class.
 
 ### Vòng lặp thuật toán
 1. Mỗi completion:
@@ -62,13 +65,14 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
   - `result = linprog(...)`, `result.x`: nghiệm LP từ SciPy.
 
 ### Từ nghiệm LP sang weight WRR
-1. Tính `worker_load[w] = sum_c demand[c] * x[c,w]`.
-2. Normalize sang candidate weight.
-3. Clip theo `[min_weight, max_weight]`.
-4. Gọi `lb.set_worker_weights(weights)` để apply (LB sẽ normalize tổng = 1).
+1. Nhận nghiệm LP dạng ma trận `allocation[c,w] = x[c,w]`.
+2. Với mỗi class `c`, lấy 1 hàng `allocation[c,:]`.
+3. Normalize + clip hàng đó theo `[min_weight, max_weight]`.
+4. Apply vào LB của class tương ứng: `class_load_balancers[class_id].set_worker_weights(row_weights)`.
 - Biến implement chính trong bước apply:
-  - `worker_loads`: tải worker suy ra từ nghiệm LP.
-  - `weights`: vector weight sau normalize/clip.
+  - `allocation`: ma trận nghiệm LP.
+  - `row_weights`: vector weight cho một class.
+  - `class_load_balancers`: LB map theo class.
   - `self.params.min_weight`, `self.params.max_weight`: biên clip.
 
 Quay lại: [algorithms index](README.md) · [docs/README](../README.md)

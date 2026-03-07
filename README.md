@@ -72,6 +72,8 @@ CLI `--policy` sẽ tự nhận policy mới mà không cần sửa `runner.py`.
 `Controller` là module riêng để:
 - Điều khiển tham số policy (ví dụ: `worker_weights` của `weighted_round_robin`)
 - Theo dõi latency theo kiểu sampling một phần traffic
+- Quản lý nhiều load balancer theo class: mỗi `service class` có một `LoadBalancer` riêng
+- Khi bật tracker: mỗi class có một `LatencyTrackerWorker` riêng
 
 Tài liệu kiến trúc controller và luồng chi tiết nằm trong thư mục `docs/`.
 
@@ -287,7 +289,7 @@ Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
 - `wrr.weights` luôn được chuẩn hóa để tổng bằng `1.0` khi apply vào Load Balancer.
 - `wrr.mode` hỗ trợ: `none`, `lp_latency`.
-- `wrr.mode = lp_latency`: map sang load-balancer-control module `wrr_lp_latency`; module này ước lượng latency theo `class_id x worker`, giải LP để phân bổ tải theo class, rồi chuyển thành `worker_weights` cho `weighted_round_robin`.
+- `wrr.mode = lp_latency`: map sang load-balancer-control module `wrr_lp_latency`; module này ước lượng latency theo `class_id x worker`, giải LP cho ma trận phân bổ `class x worker`, rồi apply mỗi hàng thành `worker_weights` cho LB tương ứng của từng class.
 - `wrr.update_interval_seconds`: chu kỳ cập nhật weight theo thời gian mô phỏng (ví dụ `60.0` nghĩa là mỗi 1 phút mô phỏng cập nhật một lần).
 - `wrr.mode = lp_latency` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
 - `wrr.mode = lp_latency` bắt buộc cần `latency_tracker.enabled=true`.

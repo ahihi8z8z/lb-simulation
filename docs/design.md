@@ -8,14 +8,14 @@
 ## Quyết định kiến trúc chính
 - `Controller` là orchestration layer:
   - nạp config.
-  - tạo `LatencyTrackerWorker` (nếu bật).
+  - tạo `LatencyTrackerWorker` theo từng `class_id` (nếu bật).
   - tạo `LoadBalancerControlModule`.
-- `LoadBalancer` chỉ giữ state và gọi policy, không tự học từ completion stream.
+- Mỗi service class có một `LoadBalancer` riêng; LB chỉ giữ state và gọi policy, không tự học từ completion stream.
 - `WrrLpLatencyControlModule`:
   - học latency theo `class_id x worker` bằng EWMA.
   - gom demand theo class trong cửa sổ thời gian.
-  - giải LP để phân bổ tải worker.
-  - chuyển kết quả thành `worker_weights` đã normalize.
+  - giải LP cho allocation matrix `class x worker`.
+  - chuyển từng hàng kết quả thành `worker_weights` đã normalize cho LB của class tương ứng.
 
 ## Lý do update theo interval thời gian
 - Tránh phụ thuộc tốc độ request (cao/thấp) khi quyết định thời điểm cập nhật.

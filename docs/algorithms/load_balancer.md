@@ -2,6 +2,9 @@
 
 Nguồn implementation: `lb_simulation/lb_policies.py`.
 
+Lưu ý runtime hiện tại:
+- Mỗi service class có một `LoadBalancer` riêng, nên mỗi policy instance hoạt động trên state của class đó.
+
 ## `random`
 - Ý tưởng: chọn worker ngẫu nhiên đều.
 - Công thức: `worker_id ~ Uniform({0..N-1})`.
