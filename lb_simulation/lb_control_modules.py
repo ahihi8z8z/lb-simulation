@@ -21,8 +21,6 @@ class WrrLpControlParams:
     max_weight: float
     lp_balance_tolerance: float
     lp_ewma_gamma: float
-    lp_use_tracked_only: bool
-    init_latency_estimate: float
 
 
 class LoadBalancerControlModule(ABC):
@@ -95,12 +93,9 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         super().__init__(num_workers=num_workers)
         self.params = params
         self.completion_count = 0
-        self.class_latency_estimates: Dict[int, np.ndarray] = {}
-        self.class_latency_samples: Dict[int, np.ndarray] = {}
         self.class_completions_window: Dict[int, int] = defaultdict(int)
         self.class_load_balancers: Dict[int, "LoadBalancer"] = {}
         self.lp_updates = 0
-        self.latency_sampled_total = 0
         self.last_lp_class_order: List[int] = []
         self.last_lp_weight_matrix: List[List[float]] = []
         self.next_update_time = float(
@@ -117,32 +112,13 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         latency: float,
         latency_tracked: bool,
     ) -> None:
+        del worker_id, latency_tracked
         self.completion_count += 1
         completion_time = float(
             np.clip(float(request.t_arrival) + float(latency), a_min=0.0, a_max=None)
         )
         class_id = int(request.class_id)
         self.class_completions_window[class_id] += 1
-
-        if self.params.lp_use_tracked_only and not latency_tracked:
-            return
-
-        estimates = self.class_latency_estimates.get(class_id)
-        if estimates is None:
-            estimates = np.full(self.num_workers, self.params.init_latency_estimate, dtype=float)
-            self.class_latency_estimates[class_id] = estimates
-        samples = self.class_latency_samples.get(class_id)
-        if samples is None:
-            samples = np.zeros(self.num_workers, dtype=int)
-            self.class_latency_samples[class_id] = samples
-
-        previous = float(estimates[worker_id])
-        gamma = self.params.lp_ewma_gamma
-        estimates[worker_id] = float(
-            np.clip((1.0 - gamma) * previous + gamma * latency, a_min=1e-9, a_max=None)
-        )
-        samples[worker_id] += 1
-        self.latency_sampled_total += 1
 
         while completion_time + 1e-12 >= self.next_update_time:
             self._maybe_update_weights()
@@ -233,8 +209,6 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
             return
         if not self.class_load_balancers:
             return
-        if self.params.lp_use_tracked_only and self.latency_sampled_total <= 0:
-            return
 
         demand_by_class = sorted(
             (
@@ -251,17 +225,11 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         cost_by_class = np.zeros((class_count, self.num_workers), dtype=float)
         for row_idx, (class_id, _) in enumerate(demand_by_class):
             class_lb = self.class_load_balancers[class_id]
-            default_cost_row = np.maximum(
+            cost_row = np.maximum(
                 np.asarray(class_lb.lat_ewma[: self.num_workers], dtype=float),
                 1e-9,
             )
-            cost_by_class[row_idx, :] = default_cost_row
-            estimates = self.class_latency_estimates.get(class_id)
-            if estimates is None:
-                continue
-
-            row_len = min(int(estimates.size), self.num_workers)
-            cost_by_class[row_idx, :row_len] = estimates[:row_len]
+            cost_by_class[row_idx, :] = cost_row
         cost_by_class = np.clip(cost_by_class, a_min=1e-9, a_max=None)
         logger.info(
             "cost by class %s",
@@ -278,14 +246,22 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         )
         self.last_lp_class_order = [class_id for class_id, _ in demand_by_class]
         self.last_lp_weight_matrix = []
+        gamma = float(np.clip(self.params.lp_ewma_gamma, a_min=0.0, a_max=1.0))
         for row_idx, class_id in enumerate(self.last_lp_class_order):
-            row_weights = self._normalize_weights_row(allocation[row_idx, :])
-            self.class_load_balancers[class_id].set_worker_weights(row_weights)
+            class_lb = self.class_load_balancers[class_id]
+            solved_weights = np.asarray(
+                self._normalize_weights_row(allocation[row_idx, :]), dtype=float
+            )
+            previous_weights = np.asarray(class_lb.worker_weights, dtype=float)
+            smooth_weights = ((1.0 - gamma) * previous_weights) + (gamma * solved_weights)
+            row_weights = self._normalize_weights_row(smooth_weights)
+            class_lb.set_worker_weights(row_weights)
             self.last_lp_weight_matrix.append([float(value) for value in row_weights])
         self.lp_updates += 1
         self.class_completions_window.clear()
         logger.info(
-            "WRR LP-latency weights updated via module solver=scipy_linprog lb_count=%d classes=%d",
+            "WRR LP-latency weights updated via module=%s solver=scipy_linprog lb_count=%d classes=%d",
+            self.name,
             len(self.class_load_balancers),
             len(demand_by_class),
         )
@@ -294,12 +270,66 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         del lbs_by_class
         return {
             "wrr_lp_solver": "scipy_linprog",
+            "wrr_lp_objective": "system_mean_latency",
             "wrr_lp_updates": self.lp_updates,
-            "wrr_lp_sampled_observations": self.latency_sampled_total,
+            "wrr_lp_weight_ema_gamma": self.params.lp_ewma_gamma,
             "wrr_lp_update_interval_seconds": self.params.update_interval_seconds,
             "wrr_lp_class_order": list(self.last_lp_class_order),
             "wrr_lp_weight_matrix": [list(row) for row in self.last_lp_weight_matrix],
         }
+
+
+@register_load_balancer_control_module
+class WrrSeparateLpLatencyControlModule(WrrLpLatencyControlModule):
+    """Solve a separate LP for each class to minimize class-local mean latency."""
+
+    name = "wrr_separate_lp_latency"
+
+    def _solve_lp(
+        self,
+        demand_by_class: Sequence[Tuple[int, float]],
+        cost_by_class: Sequence[Sequence[float]],
+    ) -> np.ndarray:
+        del demand_by_class
+        cost = np.asarray(cost_by_class, dtype=float)
+        if cost.ndim != 2:
+            raise ValueError(
+                "cost_by_class must be a 2D matrix for separate LP mode."
+            )
+        service_count, worker_count = cost.shape
+        if worker_count != self.num_workers:
+            raise ValueError(
+                "cost_by_class worker dimension mismatch: "
+                f"expected {self.num_workers}, got {worker_count}"
+            )
+        if (service_count <= 0) or (worker_count <= 0):
+            return np.zeros((service_count, worker_count), dtype=float)
+
+        cost = np.maximum(cost, 1e-9)
+        a_eq = np.ones((1, worker_count), dtype=float)
+        b_eq = np.ones(1, dtype=float)
+        allocation = np.zeros((service_count, worker_count), dtype=float)
+
+        for class_idx in range(service_count):
+            result = linprog(
+                c=cost[class_idx, :],
+                A_eq=a_eq,
+                b_eq=b_eq,
+                bounds=(0.0, 1.0),
+                method="highs",
+            )
+            if (not result.success) or (result.x is None):
+                raise RuntimeError(
+                    "LP solve failed for WRR separate_lp mode. "
+                    f"class_row={class_idx}, status={result.status}, message={result.message}"
+                )
+            allocation[class_idx, :] = np.maximum(result.x, 0.0)
+        return allocation
+
+    def summarize(self, lbs_by_class: Mapping[int, "LoadBalancer"]) -> Dict[str, object]:
+        summary = super().summarize(lbs_by_class)
+        summary["wrr_lp_objective"] = "per_class_mean_latency"
+        return summary
 
 
 from typing import TYPE_CHECKING

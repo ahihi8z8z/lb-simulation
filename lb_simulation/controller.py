@@ -48,7 +48,6 @@ class WrrControlConfig:
     max_weight: float = 10.0
     lp_balance_tolerance: float = 0.25
     lp_ewma_gamma: float = 0.10
-    lp_use_tracked_only: bool = False
 
 
 @dataclass
@@ -81,11 +80,6 @@ def _to_bool_optional(raw: object, key: str, default: Optional[bool]) -> Optiona
         if lowered in {"false", "0", "no", "off"}:
             return False
     raise ValueError(f"Invalid bool value for {key}: {raw}")
-
-
-def _to_bool(raw: object, key: str, default: bool) -> bool:
-    value = _to_bool_optional(raw, key, None)
-    return default if value is None else value
 
 
 def _parse_controller_payload(
@@ -186,20 +180,16 @@ def _parse_controller_payload(
                 ),
             ),
         ),
-        lp_use_tracked_only=_to_bool(
-            wrr_cfg_dict.get("lp_use_tracked_only"),
-            "wrr.lp_use_tracked_only",
-            False,
-        ),
     )
 
     if wrr_cfg.max_weight < wrr_cfg.min_weight:
         raise ValueError("wrr.max_weight must be >= wrr.min_weight.")
-    if wrr_cfg.mode not in {"none", "lp_latency"}:
-        raise ValueError("wrr.mode must be one of: none, lp_latency.")
-    if wrr_cfg.mode == "lp_latency" and latency_cfg.enabled is not True:
+    if wrr_cfg.mode not in {"none", "lp_latency", "separate_lp"}:
+        raise ValueError("wrr.mode must be one of: none, lp_latency, separate_lp.")
+    if (wrr_cfg.mode in {"lp_latency", "separate_lp"}) and latency_cfg.enabled is not True:
         raise ValueError(
-            "wrr.mode='lp_latency' requires latency_tracker.enabled=true in controller config."
+            "wrr.mode in {'lp_latency','separate_lp'} requires "
+            "latency_tracker.enabled=true in controller config."
         )
 
     return ControllerConfig(
@@ -302,26 +292,34 @@ class LoadBalancerController:
             raise ValueError(
                 f"Policy '{self.policy}' requires latency_tracker.enabled=true in controller config."
             )
-        if (
-            self.config.wrr.mode == "lp_latency"
-            and self.policy != "weighted_round_robin"
+        if self.config.wrr.mode in {"lp_latency", "separate_lp"} and (
+            self.policy != "weighted_round_robin"
         ):
             raise ValueError(
-                "wrr.mode='lp_latency' requires policy='weighted_round_robin'."
+                "wrr.mode in {'lp_latency','separate_lp'} requires "
+                "policy='weighted_round_robin'."
             )
         if (
             self.policy == "weighted_round_robin"
-            and self.config.wrr.mode == "lp_latency"
+            and self.config.wrr.mode in {"lp_latency", "separate_lp"}
             and (not self.latency_tracker_enabled)
         ):
             raise ValueError(
-                "Policy 'weighted_round_robin' with wrr.mode='lp_latency' requires "
-                "latency_tracker.enabled=true in controller config."
+                "Policy 'weighted_round_robin' with wrr.mode in "
+                "{'lp_latency','separate_lp'} requires latency_tracker.enabled=true "
+                "in controller config."
             )
 
-        if (self.policy == "weighted_round_robin") and (self.config.wrr.mode == "lp_latency"):
+        if (self.policy == "weighted_round_robin") and (
+            self.config.wrr.mode in {"lp_latency", "separate_lp"}
+        ):
+            module_name = (
+                "wrr_lp_latency"
+                if self.config.wrr.mode == "lp_latency"
+                else "wrr_separate_lp_latency"
+            )
             self.lb_control_module = create_load_balancer_control_module(
-                "wrr_lp_latency",
+                module_name,
                 num_workers=self.num_workers,
                 params=WrrLpControlParams(
                     update_interval_seconds=self.config.wrr.update_interval_seconds,
@@ -329,8 +327,6 @@ class LoadBalancerController:
                     max_weight=self.config.wrr.max_weight,
                     lp_balance_tolerance=self.config.wrr.lp_balance_tolerance,
                     lp_ewma_gamma=self.config.wrr.lp_ewma_gamma,
-                    lp_use_tracked_only=self.config.wrr.lp_use_tracked_only,
-                    init_latency_estimate=self.config.latency_tracker.init_estimate,
                 ),
             )
         else:

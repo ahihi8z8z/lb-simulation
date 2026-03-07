@@ -10,7 +10,7 @@
 | `lb_simulation/inference_pool.py` | `InferencePool` | Mô phỏng phục vụ request trên pool worker SimPy và phát completion callback. |
 | `lb_simulation/controller.py` | `LoadBalancerController` | Điều phối latency tracker và LB control module. |
 | `lb_simulation/latency_tracker.py` | `LatencyTrackerWorker` | Sampling latency theo redirect policy, EWMA estimate theo worker. |
-| `lb_simulation/lb_control_modules.py` | `LoadBalancerControlModule` + subclasses | Điều khiển tham số LB theo control loop (hiện có `none`, `wrr_lp_latency`). |
+| `lb_simulation/lb_control_modules.py` | `LoadBalancerControlModule` + subclasses | Điều khiển tham số LB theo control loop (hiện có `none`, `wrr_lp_latency`, `wrr_separate_lp_latency`). |
 | `lb_simulation/metrics.py` | `MetricsCollector` | Thu số liệu dispatch/completion và tổng hợp KPI cuối run. |
 | `lb_simulation/traffic.py` | `TrafficGenerator`, `ServiceClassTrafficSpec` | Sinh traffic theo từng class từ trace hoặc gamma model. |
 | `lb_simulation/workers.py` | `WorkerClassSpec`, `WorkerSpec` | Mô tả worker class từ config và worker runtime sau khi expand. |
@@ -38,7 +38,7 @@
 | `latency_tracker_enabled` | `bool` | Bật/tắt tracker theo config đã validate. |
 | `class_load_balancers` | `Dict[int, LoadBalancer]` | Map `class_id -> LB` (mỗi class một LB). |
 | `latency_trackers_by_class` | `Dict[int, LatencyTrackerWorker]` | Map `class_id -> tracker` (mỗi class một tracker state riêng). |
-| `lb_control_module` | `LoadBalancerControlModule` | Module điều khiển LB đang dùng (`none` hoặc `wrr_lp_latency`). |
+| `lb_control_module` | `LoadBalancerControlModule` | Module điều khiển LB đang dùng (`none`, `wrr_lp_latency`, hoặc `wrr_separate_lp_latency`). |
 
 ### `LatencyTrackerWorker`
 | Biến | Kiểu | Ý nghĩa |
@@ -56,8 +56,6 @@
 |---|---|---|
 | `params` | `WrrLpControlParams` | Bộ tham số LP/weight update (`WrrLpControlParams`). |
 | `class_load_balancers` | `Dict[int, LoadBalancer]` | LB map theo class mà module đang điều khiển. |
-| `class_latency_estimates` | `Dict[int, np.ndarray]` | Ma trận EWMA latency theo `class_id x worker`. |
-| `class_latency_samples` | `Dict[int, np.ndarray]` | Số mẫu tương ứng theo `class_id x worker`. |
 | `class_completions_window` | `Dict[int, int]` | Demand theo class trong cửa sổ update hiện tại. |
 | `next_update_time` | `float` | Mốc thời gian mô phỏng lần update kế tiếp. |
 | `lp_updates` | `int` | Số lần LP update thành công. |
@@ -94,10 +92,9 @@
 ### `controller.wrr`
 | Key | Kiểu | Tác dụng |
 |---|---|---|
-| `mode` | `str` | `none` hoặc `lp_latency`. |
+| `mode` | `str` | `none`, `lp_latency`, hoặc `separate_lp`. |
 | `weights` | `Optional[List[float]]` | Weight ban đầu (nếu có), LB sẽ normalize về tổng 1. |
 | `update_interval_seconds` | `float` | Chu kỳ cập nhật weight theo thời gian mô phỏng. |
-| `lp_balance_tolerance` | `float` | Độ cho phép lệch tải mỗi worker quanh target trung bình. |
-| `lp_ewma_gamma` | `float` | Gamma EWMA dùng trong bảng latency `class x worker` của module LP. |
-| `lp_use_tracked_only` | `bool` | Nếu `true`, chỉ dùng completion đã tracked để học latency LP. |
+| `lp_balance_tolerance` | `float` | Độ cho phép lệch tải mỗi worker quanh target trung bình (chỉ dùng cho `lp_latency`). |
+| `lp_ewma_gamma` | `float` | Hệ số EMA để làm mượt weight mới từ LP với weight hiện tại. |
 | `min_weight`, `max_weight` | `float` | Chặn biên độ weight trước khi normalize cuối cùng. |

@@ -22,7 +22,7 @@
   - `lb_control_module`: điều khiển tham số cho toàn bộ LB (ví dụ WRR LP latency).
 - `lb_simulation/lb_control_modules.py`
   - Module điều khiển LB có thể cắm thêm bằng registry.
-  - Hiện có `none` và `wrr_lp_latency`.
+  - Hiện có `none`, `wrr_lp_latency`, `wrr_separate_lp_latency`.
 
 ## Kiến trúc module hóa
 - Policy LB: registry trong `lb_policies.py` (`@register_policy`).
@@ -34,7 +34,7 @@
 - `LoadBalancer.worker_weights` luôn được chuẩn hóa tổng bằng `1.0`.
 - Mỗi class có LB riêng (`lb_id=class_<class_id>`).
 - Khi bật tracker: mỗi class có tracker state riêng, không dùng chung EWMA giữa các class.
-- `wrr.mode=lp_latency` yêu cầu:
+- `wrr.mode=lp_latency` hoặc `wrr.mode=separate_lp` yêu cầu:
   - policy LB là `weighted_round_robin`.
   - `latency_tracker.enabled=true`.
   - có `scipy.optimize.linprog`.

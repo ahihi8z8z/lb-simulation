@@ -80,7 +80,7 @@ Tài liệu kiến trúc controller và luồng chi tiết nằm trong thư mụ
 Ghi chú vận hành quan trọng:
 - Mặc định (không truyền `--controller-config`) controller ở chế độ no-op.
 - Với policy cần latency (`latency_only`) bắt buộc truyền `--controller-config` và set `latency_tracker.enabled=true`.
-- Với `weighted_round_robin` khi `wrr.mode = lp_latency`, cũng bắt buộc `latency_tracker.enabled=true`.
+- Với `weighted_round_robin` khi `wrr.mode = lp_latency` hoặc `separate_lp`, cũng bắt buộc `latency_tracker.enabled=true`.
 
 ## 📊 Metrics đầu ra
 - Mean / Median / P95 / P99 latency
@@ -280,8 +280,7 @@ Ví dụ:
     "min_weight": 0.2,
     "max_weight": 5.0,
     "lp_balance_tolerance": 0.25,
-    "lp_ewma_gamma": 0.1,
-    "lp_use_tracked_only": false
+    "lp_ewma_gamma": 0.1
   }
 }
 ```
@@ -290,14 +289,17 @@ Ghi chú:
 - `wrr.weights` có thể set static weights ban đầu (độ dài phải đúng số worker).
 - `wrr.weights` luôn được chuẩn hóa để tổng bằng `1.0` khi apply vào Load Balancer.
 - `wrr.weights` phải có mọi phần tử `> 0`.
-- `wrr.mode` hỗ trợ: `none`, `lp_latency`.
-- `wrr.mode = lp_latency`: map sang load-balancer-control module `wrr_lp_latency`; module này ước lượng latency theo `class_id x worker`, giải LP cho ma trận phân bổ `class x worker`, rồi apply mỗi hàng thành `worker_weights` cho LB tương ứng của từng class.
+- `wrr.mode` hỗ trợ: `none`, `lp_latency`, `separate_lp`.
+- `wrr.mode = lp_latency`: map sang load-balancer-control module `wrr_lp_latency`; module này dùng latency estimate từ `latency_tracker` để giải LP cho ma trận phân bổ `class x worker`, rồi apply mỗi hàng thành `worker_weights` cho LB tương ứng của từng class.
+- `wrr.mode = separate_lp`: map sang `wrr_separate_lp_latency`; module này giải LP riêng cho từng class để tối ưu mean latency của chính class đó.
 - `wrr.update_interval_seconds`: chu kỳ cập nhật weight theo thời gian mô phỏng (ví dụ `60.0` nghĩa là mỗi 1 phút mô phỏng cập nhật một lần).
-- `wrr.mode = lp_latency` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
-- `wrr.mode = lp_latency` bắt buộc cần `latency_tracker.enabled=true`.
-- `wrr.lp_balance_tolerance` điều khiển biên độ cân bằng tải mỗi worker quanh mức trung bình.
+- `wrr.mode = lp_latency` và `wrr.mode = separate_lp` bắt buộc cần `scipy` (dùng `scipy.optimize.linprog`), không có fallback heuristic.
+- `wrr.mode = lp_latency` và `wrr.mode = separate_lp` bắt buộc cần `latency_tracker.enabled=true`.
+- `wrr.lp_balance_tolerance` điều khiển biên độ cân bằng tải mỗi worker quanh mức trung bình (chỉ áp dụng cho `wrr.mode = lp_latency`).
+- `wrr.lp_ewma_gamma` là hệ số làm mượt weight: `new_weight = (1-gamma)*weight_cũ + gamma*weight_từ_LP`.
 - Nếu `wrr.mode = none`, `wrr.weights` là bộ trọng số cố định suốt runtime.
 - Nếu `wrr.mode = lp_latency`, `wrr.weights` là trọng số khởi tạo; sau đó module control sẽ cập nhật lại theo chu kỳ `wrr.update_interval_seconds`.
+- Nếu `wrr.mode = separate_lp`, `wrr.weights` cũng chỉ là trọng số khởi tạo; sau đó mỗi class sẽ được cập nhật weight riêng theo LP của class đó.
 - Ví dụ `2 class` và `3 worker`:
   - Trong file config, chỉ khai báo 1 vector cho worker: `"weights": [0.2, 0.3, 0.5]`.
   - Vì mỗi class có 1 LB riêng, lúc khởi tạo cả LB class 0 và LB class 1 đều nhận cùng vector `[0.2, 0.3, 0.5]`.
@@ -305,6 +307,7 @@ Ghi chú:
   - Nếu `wrr.mode = lp_latency`: LP sẽ sinh ma trận theo class x worker, ví dụ:
     - class 0: `[0.10, 0.30, 0.60]`
     - class 1: `[0.55, 0.35, 0.10]`
+  - Nếu `wrr.mode = separate_lp`: LP cũng sinh ma trận `class x worker`, nhưng mỗi hàng được solve độc lập theo objective mean latency của class tương ứng.
   - Ma trận trên là trạng thái runtime do LP tối ưu, không phải format nhập trực tiếp vào `wrr.weights`.
 - `latency_tracker.ewma_gamma` là hệ số EWMA để ước lượng latency từ sample.
 - `latency_tracker.redirect_policy` hiện có:
