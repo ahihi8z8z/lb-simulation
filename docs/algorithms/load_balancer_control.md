@@ -24,7 +24,6 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
 - `next_update_time`: mốc cập nhật kế tiếp theo giây mô phỏng.
 - Các biến runtime quan trọng khác:
   - `class_latency_samples[class_id][worker]`: đếm số sample latency theo class-worker.
-  - `last_weights`: weight vòng trước (phục vụ EMA smoothing).
   - `latency_sampled_total`: tổng số sample đã dùng cho module.
   - `lp_updates`: số lần update weight thành công.
 
@@ -47,7 +46,8 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
 ### Bài toán LP
 - Biến quyết định: `x[c,w]` = tỉ lệ traffic class `c` gán cho worker `w`.
 - Mục tiêu:
-  - minimize `sum_c sum_w demand[c] * latency_cost[c,w] * x[c,w]`.
+  - minimize `sum_c sum_w p[c] * latency_cost[c,w] * x[c,w]`, với `p[c] = demand[c]/sum_k demand[k]`.
+  - Đây chính là tối thiểu hóa mean latency toàn hệ thống trong cửa sổ cập nhật.
 - Ràng buộc:
   - `sum_w x[c,w] = 1` cho mọi class `c`.
   - Cân bằng tải worker theo tolerance:
@@ -65,12 +65,10 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
 1. Tính `worker_load[w] = sum_c demand[c] * x[c,w]`.
 2. Normalize sang candidate weight.
 3. Clip theo `[min_weight, max_weight]`.
-4. (Tuỳ chọn) làm mượt EMA với `last_weights`.
-5. Gọi `lb.set_worker_weights(weights)` để apply (LB sẽ normalize tổng = 1).
+4. Gọi `lb.set_worker_weights(weights)` để apply (LB sẽ normalize tổng = 1).
 - Biến implement chính trong bước apply:
   - `worker_loads`: tải worker suy ra từ nghiệm LP.
-  - `weights`: vector weight sau normalize/clip/smoothing.
+  - `weights`: vector weight sau normalize/clip.
   - `self.params.min_weight`, `self.params.max_weight`: biên clip.
-  - `self.params.lp_weight_ema_decay`: hệ số làm mượt.
 
 Quay lại: [algorithms index](README.md) · [docs/README](../README.md)

@@ -28,6 +28,7 @@ class DetailMetricSeries:
     arrivals_by_class: Dict[str, List[float]] = field(default_factory=dict)
     completions_by_class: Dict[str, List[float]] = field(default_factory=dict)
     latencies_by_class: Dict[str, List[float]] = field(default_factory=dict)
+    latencies_by_worker: Dict[str, List[float]] = field(default_factory=dict)
 
 
 def _append_by_class(store: Dict[str, List[float]], class_id: str, value: float) -> None:
@@ -55,12 +56,14 @@ def _load_columns(csv_path: Path) -> DetailMetricSeries:
                 continue
 
             class_id = str(row.get("class_id", "unknown")).strip() or "unknown"
+            worker_id = str(row.get("worker_id", "unknown")).strip() or "unknown"
             series.arrivals.append(t_arrival)
             series.completions.append(t_done)
             series.latencies.append(latency)
             _append_by_class(series.arrivals_by_class, class_id, t_arrival)
             _append_by_class(series.completions_by_class, class_id, t_done)
             _append_by_class(series.latencies_by_class, class_id, latency)
+            _append_by_class(series.latencies_by_worker, worker_id, latency)
 
     if not series.arrivals:
         raise ValueError(f"{csv_path} has no valid data rows.")
@@ -223,6 +226,39 @@ def plot_latency_histogram_by_class(
     plt.close(fig)
 
 
+def plot_latency_histogram_by_worker(
+    latencies_by_worker: Dict[str, List[float]],
+    out_path: Path,
+    bins: int,
+    dpi: int,
+) -> None:
+    worker_ids = sorted(latencies_by_worker.keys(), key=_class_sort_key)
+    if not worker_ids:
+        return
+
+    fig, axes = plt.subplots(
+        len(worker_ids),
+        1,
+        figsize=(8, max(4.0, 2.6 * len(worker_ids))),
+        sharex=True,
+    )
+    if len(worker_ids) == 1:
+        axes = [axes]
+
+    for ax, worker_id in zip(axes, worker_ids):
+        latencies = latencies_by_worker.get(worker_id, [])
+        ax.hist(latencies, bins=max(1, bins), edgecolor="black", alpha=0.85)
+        ax.set_title(f"Worker {worker_id}")
+        ax.set_ylabel("Count")
+        ax.grid(True, axis="y", alpha=0.25)
+
+    axes[-1].set_xlabel("Latency (s)")
+    fig.suptitle("Latency Histogram By Worker")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plot charts from request_detail_metrics.csv")
     parser.add_argument(
@@ -270,6 +306,7 @@ def main() -> None:
     req_by_class_plot_path = out_dir / "requests_over_time_by_service_class.png"
     lat_total_plot_path = out_dir / "latency_histogram_total.png"
     lat_by_class_plot_path = out_dir / "latency_histogram_by_service_class.png"
+    lat_by_worker_plot_path = out_dir / "latency_histogram_by_worker.png"
 
     plot_requests_over_time(
         arrivals=series.arrivals,
@@ -296,11 +333,18 @@ def main() -> None:
         bins=args.latency_bins,
         dpi=args.dpi,
     )
+    plot_latency_histogram_by_worker(
+        latencies_by_worker=series.latencies_by_worker,
+        out_path=lat_by_worker_plot_path,
+        bins=args.latency_bins,
+        dpi=args.dpi,
+    )
 
     print(f"Saved: {req_total_plot_path}")
     print(f"Saved: {req_by_class_plot_path}")
     print(f"Saved: {lat_total_plot_path}")
     print(f"Saved: {lat_by_class_plot_path}")
+    print(f"Saved: {lat_by_worker_plot_path}")
 
 
 if __name__ == "__main__":

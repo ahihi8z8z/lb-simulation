@@ -15,6 +15,7 @@ class MetricsCollector:
     def __init__(self, num_workers: int) -> None:
         self.latencies: List[float] = []
         self.latencies_by_class: Dict[int, List[float]] = {}
+        self.latencies_by_worker: Dict[int, List[float]] = {}
         self.worker_busy_time: List[float] = [0.0 for _ in range(num_workers)]
         self.queue_samples: List[int] = []
         self.global_inflight_samples: List[int] = []
@@ -43,6 +44,7 @@ class MetricsCollector:
         self.latencies.append(latency)
         self.worker_busy_time[worker_id] += service_time
         self.latencies_by_class.setdefault(class_id, []).append(latency)
+        self.latencies_by_worker.setdefault(worker_id, []).append(latency)
         logger.debug(
             "Completion metric recorded worker=%d class=%d latency=%.4f",
             worker_id,
@@ -69,6 +71,14 @@ class MetricsCollector:
             }
             for class_id, values in sorted(self.latencies_by_class.items())
         }
+        by_worker: Dict[int, Dict[str, object]] = {}
+        for worker_id in range(len(self.worker_busy_time)):
+            values = self.latencies_by_worker.get(worker_id, [])
+            by_worker[worker_id] = {
+                "count": len(values),
+                "mean": statistics.fmean(values) if values else 0.0,
+                "p95": percentile(values, 95),
+            }
         logger.info(
             "Summarized metrics dispatched=%d completed=%d mean_latency=%.4f",
             self.dispatch_count,
@@ -93,4 +103,5 @@ class MetricsCollector:
             "avg_utilization": statistics.fmean(utilization) if utilization else 0.0,
             "utilization_by_worker": utilization,
             "latency_by_class": by_class,
+            "latency_by_worker": by_worker,
         }

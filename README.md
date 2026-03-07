@@ -87,6 +87,7 @@ Ghi chú vận hành quan trọng:
 - Avg global inflight
 - Worker utilization
 - Latency theo class (nếu dùng nhiều class)
+- Latency theo worker
 
 ## 📝 Request Detail Metrics (CSV)
 Mỗi lần chạy sẽ tự tạo một thư mục con trong `./logs` theo dạng:
@@ -268,7 +269,6 @@ Ví dụ:
     "max_weight": 5.0,
     "lp_balance_tolerance": 0.25,
     "lp_ewma_gamma": 0.1,
-    "lp_weight_ema_decay": 0.2,
     "lp_use_tracked_only": false
   }
 }
@@ -313,3 +313,4 @@ Output:
 - `requests_over_time_by_service_class.png`
 - `latency_histogram_total.png`
 - `latency_histogram_by_service_class.png`
+- `latency_histogram_by_worker.png`

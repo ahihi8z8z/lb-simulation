@@ -57,7 +57,6 @@
 | `class_latency_samples` | `Dict[int, List[int]]` | Số mẫu tương ứng theo `class_id x worker`. |
 | `class_completions_window` | `Dict[int, int]` | Demand theo class trong cửa sổ update hiện tại. |
 | `next_update_time` | `float` | Mốc thời gian mô phỏng lần update kế tiếp. |
-| `last_weights` | `List[float]` | Weights vòng trước (dùng cho EMA decay khi bật). |
 | `lp_updates` | `int` | Số lần LP update thành công. |
 
 ### `InferencePool`
@@ -95,6 +94,5 @@
 | `update_interval_seconds` | `float` | Chu kỳ cập nhật weight theo thời gian mô phỏng. |
 | `lp_balance_tolerance` | `float` | Độ cho phép lệch tải mỗi worker quanh target trung bình. |
 | `lp_ewma_gamma` | `float` | Gamma EWMA dùng trong bảng latency `class x worker` của module LP. |
-| `lp_weight_ema_decay` | `float` | Làm mượt weights mới theo EMA với weights cũ. |
 | `lp_use_tracked_only` | `bool` | Nếu `true`, chỉ dùng completion đã tracked để học latency LP. |
 | `min_weight`, `max_weight` | `float` | Chặn biên độ weight trước khi normalize cuối cùng. |

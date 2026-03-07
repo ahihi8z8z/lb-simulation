@@ -20,7 +20,6 @@ class WrrLpControlParams:
     max_weight: float
     lp_balance_tolerance: float
     lp_ewma_gamma: float
-    lp_weight_ema_decay: float
     lp_use_tracked_only: bool
     init_latency_estimate: float
 
@@ -100,7 +99,6 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         self.class_latency_samples: Dict[int, List[int]] = {}
         self.class_completions_window: Dict[int, int] = defaultdict(int)
         self.lp_updates = 0
-        self.last_weights: List[float] = []
         self.latency_sampled_total = 0
         self.next_update_time = max(1e-9, float(params.update_interval_seconds))
 
@@ -153,12 +151,6 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
             min(max(value, self.params.min_weight), self.params.max_weight)
             for value in candidate
         ]
-        decay = self.params.lp_weight_ema_decay
-        if (decay > 0.0) and self.last_weights:
-            clipped = [
-                decay * self.last_weights[idx] + (1.0 - decay) * clipped[idx]
-                for idx in range(self.num_workers)
-            ]
         return clipped
 
     def _solve_lp(
@@ -170,12 +162,20 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         worker_count = self.num_workers
         if (service_count <= 0) or (worker_count <= 0):
             return [0.0 for _ in range(worker_count)]
+        total_demand = sum(max(0.0, demand) for _, demand in demand_by_class)
+        if total_demand <= 0:
+            return [0.0 for _ in range(worker_count)]
 
         c: List[float] = []
         for class_idx in range(service_count):
             demand = demand_by_class[class_idx][1]
             for worker_idx in range(worker_count):
-                c.append(demand * max(1e-9, float(cost_by_class[class_idx][worker_idx])))
+                # Minimize system-wide mean latency:
+                # sum_c,w P(class=c) * cost[c,w] * x[c,w], where P(c)=demand[c]/total_demand.
+                c.append(
+                    (demand / total_demand)
+                    * max(1e-9, float(cost_by_class[class_idx][worker_idx]))
+                )
 
         variable_count = service_count * worker_count
         a_eq = [[0.0 for _ in range(variable_count)] for _ in range(service_count)]
@@ -185,7 +185,6 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
                 a_eq[class_idx][base + worker_idx] = 1.0
         b_eq = [1.0 for _ in range(service_count)]
 
-        total_demand = sum(demand for _, demand in demand_by_class)
         target = total_demand / worker_count
         epsilon = self.params.lp_balance_tolerance * target
         lower = max(0.0, target - epsilon)
@@ -258,7 +257,6 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         )
         weights = self._normalize_weights(worker_loads)
         lb.set_worker_weights(weights)
-        self.last_weights = list(weights)
         self.lp_updates += 1
         self.class_completions_window.clear()
         logger.info(

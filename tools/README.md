@@ -6,11 +6,12 @@ Thư mục này chứa các utility script hỗ trợ phân tích/kỹ thuật, 
 
 Script: `tools/plot_detail_metrics.py`
 
-Vẽ 4 hình từ `request_detail_metrics.csv`:
+Vẽ 5 hình từ `request_detail_metrics.csv`:
 - `requests_over_time_total.png`: số request theo thời gian (arrivals/completions, tổng)
 - `requests_over_time_by_service_class.png`: số request theo thời gian, chia theo service class
 - `latency_histogram_total.png`: histogram latency tổng
 - `latency_histogram_by_service_class.png`: histogram latency chia theo service class
+- `latency_histogram_by_worker.png`: histogram latency chia theo worker
 
 ### Cài phụ thuộc cho tools
 ```bash

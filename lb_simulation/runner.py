@@ -510,6 +510,15 @@ def print_summary(summary: Dict[str, object]) -> None:
                 f"mean={stats['mean']:.4f}s p95={stats['p95']:.4f}s"
             )
 
+    by_worker = summary.get("latency_by_worker", {})
+    if isinstance(by_worker, dict) and by_worker:
+        print("\nLatency by worker:")
+        for worker_id, stats in by_worker.items():
+            print(
+                f"  worker {worker_id}: count={stats['count']} "
+                f"mean={stats['mean']:.4f}s p95={stats['p95']:.4f}s"
+            )
+
 
 def main() -> None:
     """CLI main function."""

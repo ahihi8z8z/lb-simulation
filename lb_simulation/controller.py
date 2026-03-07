@@ -48,7 +48,6 @@ class WrrControlConfig:
     max_weight: float = 10.0
     lp_balance_tolerance: float = 0.25
     lp_ewma_gamma: float = 0.10
-    lp_weight_ema_decay: float = 0.0
     lp_use_tracked_only: bool = False
 
 
@@ -184,17 +183,6 @@ def _parse_controller_payload(
                     wrr_cfg_dict.get("lp_ewma_gamma"),
                     "wrr.lp_ewma_gamma",
                     0.10,
-                ),
-            ),
-        ),
-        lp_weight_ema_decay=max(
-            0.0,
-            min(
-                0.999999,
-                _to_float(
-                    wrr_cfg_dict.get("lp_weight_ema_decay"),
-                    "wrr.lp_weight_ema_decay",
-                    0.0,
                 ),
             ),
         ),
@@ -350,7 +338,6 @@ class LoadBalancerController:
                     max_weight=self.config.wrr.max_weight,
                     lp_balance_tolerance=self.config.wrr.lp_balance_tolerance,
                     lp_ewma_gamma=self.config.wrr.lp_ewma_gamma,
-                    lp_weight_ema_decay=self.config.wrr.lp_weight_ema_decay,
                     lp_use_tracked_only=self.config.wrr.lp_use_tracked_only,
                     init_latency_estimate=self.config.latency_tracker.init_estimate,
                 ),
