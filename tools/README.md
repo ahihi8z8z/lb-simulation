@@ -30,6 +30,32 @@ Tùy chọn:
 - `--latency-bins`: số bin cho histogram latency (mặc định `50`)
 - `--dpi`: độ phân giải ảnh (mặc định `150`)
 
+## So sánh nhiều log folder theo latency metrics
+
+Script: `tools/plot_log_comparison.py`
+
+Vẽ 3 biểu đồ cột so sánh giữa nhiều run:
+- `latency_compare_system.png`: so sánh toàn hệ thống (mean, median, p95, p99)
+- `latency_compare_by_service.png`: so sánh theo từng service class (mean, median, p95, p99)
+- `latency_compare_by_worker.png`: so sánh theo từng worker (mean, median, p95, p99)
+
+### Cách chạy
+```bash
+python3 tools/plot_log_comparison.py \
+  --run logs/run-YYYYMMDD-HHMMSS=baseline \
+  --run logs/run-YYYYMMDD-HHMMSS=candidate \
+  --output-dir logs/comparison_plots
+```
+
+Tùy chọn:
+- `--run`: input dạng `<log_folder>=<label>`, lặp lại nhiều lần để so sánh.
+- `--output-dir`: thư mục output ảnh (mặc định `logs/comparison_plots`)
+- `--dpi`: độ phân giải ảnh (mặc định `150`)
+
+Ràng buộc:
+- Nếu các run không có cấu hình service/worker giống nhau thì tool báo lỗi và không vẽ.
+- Nếu summary của run không có đủ median/p99 theo service/worker, tool sẽ fallback đọc `request_detail_metrics.csv` (nếu có). Nếu không có detail CSV thì tool báo lỗi.
+
 ## Cắt trace theo cửa sổ thời gian
 
 Script: `tools/extract_trace_window.py`
