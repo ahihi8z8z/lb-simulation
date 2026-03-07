@@ -75,4 +75,15 @@ Nguồn implementation: `lb_simulation/lb_control_modules.py`.
   - `class_load_balancers`: LB map theo class.
   - `self.params.min_weight`, `self.params.max_weight`: biên clip.
 
+### Ví dụ `2 class` và `3 worker`
+- Cấu hình controller chỉ nhận `wrr.weights` theo worker, ví dụ:
+  - `"weights": [0.2, 0.3, 0.5]`
+- Với design hiện tại (mỗi class một LB):
+  - LB class 0 khởi tạo với `[0.2, 0.3, 0.5]`.
+  - LB class 1 khởi tạo với `[0.2, 0.3, 0.5]`.
+- Ở `wrr.mode=lp_latency`, sau khi solve LP có thể ra ma trận:
+  - class 0 -> `[0.10, 0.30, 0.60]`
+  - class 1 -> `[0.55, 0.35, 0.10]`
+- Nghĩa là input config là 1 vector khởi tạo, còn ma trận `class x worker` là output runtime do LP cập nhật.
+
 Quay lại: [algorithms index](README.md) · [docs/README](../README.md)
