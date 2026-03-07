@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import glob
 import json
 import statistics
 from dataclasses import dataclass
@@ -175,6 +176,26 @@ def _coerce_metric_block(
     return out
 
 
+def _expand_run_dirs(raw_dir_expr: str) -> List[Path]:
+    expr = raw_dir_expr.strip()
+    if not expr:
+        return []
+
+    if glob.has_magic(expr):
+        matched_paths = sorted(Path(value) for value in glob.glob(expr))
+        matched_dirs = [path for path in matched_paths if path.is_dir()]
+        if not matched_dirs:
+            raise ValueError(
+                f"Pattern '{raw_dir_expr}' did not match any log directories."
+            )
+        return matched_dirs
+
+    run_dir = Path(expr)
+    if not run_dir.is_dir():
+        raise ValueError(f"Log directory does not exist: {run_dir}")
+    return [run_dir]
+
+
 def _load_run_metrics(run_dir: Path, label_override: Optional[str]) -> RunMetrics:
     summary_path = run_dir / "summary.json"
     if not summary_path.exists():
@@ -259,18 +280,18 @@ def _parse_run_specs(specs: Sequence[str]) -> List[Tuple[Path, Optional[str]]]:
             raise ValueError("Invalid empty --run value.")
         if "=" in text:
             raw_dir, raw_label = text.split("=", 1)
-            run_dir = Path(raw_dir.strip())
             label = raw_label.strip()
-            if (not str(run_dir).strip()) or (not label):
+            if (not raw_dir.strip()) or (not label):
                 raise ValueError(
                     f"Invalid --run '{spec}'. When using '=', both folder and label are required."
                 )
-            parsed.append((run_dir, label))
+            for run_dir in _expand_run_dirs(raw_dir):
+                parsed.append((run_dir, label))
             continue
-        run_dir = Path(text)
-        if not str(run_dir).strip():
+        if not text:
             raise ValueError(f"Invalid --run '{spec}'.")
-        parsed.append((run_dir, None))
+        for run_dir in _expand_run_dirs(text):
+            parsed.append((run_dir, None))
     if len(parsed) < 2:
         raise ValueError("At least 2 --run inputs are required for comparison.")
     return parsed
@@ -411,6 +432,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Input run in format <log_folder> or <log_folder>=<label>. "
+            "Supports glob patterns like logs/run*. "
             "If label is omitted, tool infers label from policy "
             "(and for WRR includes control mode/module)."
         ),

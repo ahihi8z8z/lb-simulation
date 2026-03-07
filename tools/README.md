@@ -55,8 +55,16 @@ python3 tools/plot_log_comparison.py \
   --output-dir logs/comparison_plots
 ```
 
+Hoặc chọn nhiều folder bằng wildcard:
+```bash
+python3 tools/plot_log_comparison.py \
+  --run "logs/run-20260308-00*" \
+  --output-dir logs/comparison_plots
+```
+
 Tùy chọn:
 - `--run`: input dạng `<log_folder>` hoặc `<log_folder>=<label>`, lặp lại nhiều lần để so sánh.
+  - Hỗ trợ wildcard/glob (ví dụ `logs/run*`) để chọn nhiều folder trong một `--run`.
   - Nếu không truyền label, tool tự suy ra label từ policy load balancer.
   - Riêng `weighted_round_robin`, label tự động có thêm control mode/module
     (ví dụ: `weighted_round_robin:lp_latency`, `weighted_round_robin:separate_lp`).
