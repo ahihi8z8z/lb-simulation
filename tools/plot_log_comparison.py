@@ -330,28 +330,24 @@ def _plot_grouped_metric_bars(
     rows: Sequence[Mapping[str, float]],
     title: str,
 ) -> None:
-    x = list(range(len(labels)))
-    width = 0.18
-    offsets = {
-        "mean": -1.5 * width,
-        "median": -0.5 * width,
-        "p95": 0.5 * width,
-        "p99": 1.5 * width,
-    }
-    for metric in METRICS:
-        values = [float(row.get(metric, 0.0)) for row in rows]
+    x = list(range(len(METRICS)))
+    run_count = max(1, len(labels))
+    width = 0.8 / float(run_count)
+    for run_idx, run_label in enumerate(labels):
+        values = [float(rows[run_idx].get(metric, 0.0)) for metric in METRICS]
+        offset = (run_idx - (run_count - 1) / 2.0) * width
         ax.bar(
-            [value + offsets[metric] for value in x],
+            [value + offset for value in x],
             values,
             width=width,
-            label=_METRIC_TITLE[metric],
+            label=run_label,
         )
     ax.set_title(title)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=20, ha="right")
+    ax.set_xticklabels([_METRIC_TITLE[metric] for metric in METRICS])
     ax.set_ylabel("Latency (s)")
     ax.grid(True, axis="y", alpha=0.25)
-    ax.legend()
+    ax.legend(title="Run / Algorithm")
 
 
 def plot_system_comparison(runs: Sequence[RunMetrics], out_path: Path, dpi: int) -> None:
@@ -432,7 +428,8 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Input run in format <log_folder> or <log_folder>=<label>. "
-            "Supports glob patterns like logs/run*. "
+            "Supports glob patterns like \"logs/run*\" "
+            "(quote pattern to avoid shell expansion). "
             "If label is omitted, tool infers label from policy "
             "(and for WRR includes control mode/module)."
         ),

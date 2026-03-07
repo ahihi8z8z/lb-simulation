@@ -39,6 +39,10 @@ Vẽ 3 biểu đồ cột so sánh giữa nhiều run:
 - `latency_compare_by_service.png`: so sánh theo từng service class (mean, median, p95, p99)
 - `latency_compare_by_worker.png`: so sánh theo từng worker (mean, median, p95, p99)
 
+Layout biểu đồ:
+- Mỗi nhóm theo loại latency: `Mean`, `Median`, `P95`, `P99`.
+- Các cột trong mỗi nhóm là các run/thuật toán (theo label).
+
 ### Cách chạy
 ```bash
 python3 tools/plot_log_comparison.py \
@@ -61,6 +65,9 @@ python3 tools/plot_log_comparison.py \
   --run "logs/run-20260308-00*" \
   --output-dir logs/comparison_plots
 ```
+
+Lưu ý: khi dùng wildcard/glob cho `--run`, nên đặt pattern trong dấu `""`
+để tránh shell tự expand trước khi script parse tham số.
 
 Tùy chọn:
 - `--run`: input dạng `<log_folder>` hoặc `<log_folder>=<label>`, lặp lại nhiều lần để so sánh.
