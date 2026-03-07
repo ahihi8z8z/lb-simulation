@@ -20,6 +20,7 @@ class LoadBalancer:
         init_ewma: float = 0.5,
         explore_coef: float = 0.10,
         epsilon: float = 0.03,
+        lb_id: Optional[str] = None,
         rng: Optional[random.Random] = None,
     ) -> None:
         if num_workers <= 0:
@@ -28,6 +29,7 @@ class LoadBalancer:
         self.policy = policy.strip().lower()
         self.explore_coef = explore_coef
         self.epsilon = epsilon
+        self.lb_id = lb_id or "default"
         self.rng = rng or random.Random()
 
         self.lat_ewma: List[float] = [init_ewma for _ in range(num_workers)]
@@ -43,7 +45,8 @@ class LoadBalancer:
         self._should_redirect_to_tracker: Optional[Callable[[Request], bool]] = None
         self._redirect_target_by_rid: Dict[int, int] = {}
         logger.info(
-            "LoadBalancer initialized policy=%s workers=%d",
+            "LoadBalancer initialized id=%s policy=%s workers=%d",
+            self.lb_id,
             self.policy,
             self.num_workers,
         )
@@ -116,7 +119,11 @@ class LoadBalancer:
             )
         self.latency_tracker_worker_id = tracker_worker_id
         self._should_redirect_to_tracker = should_redirect
-        logger.info("Latency tracker configured with worker_id=%d", tracker_worker_id)
+        logger.info(
+            "Latency tracker configured lb_id=%s worker_id=%d",
+            self.lb_id,
+            tracker_worker_id,
+        )
 
     def consume_redirect_target(self, request_id: int) -> Optional[int]:
         """Get and clear real worker selected before tracker redirection."""
@@ -163,7 +170,8 @@ class LoadBalancer:
         self.worker_weights = normalized
         logger.info(
             "Updated worker weights for main load balancer "
-            "(real_workers=%d tracker_worker_id=%s sum=1): %s",
+            "(lb_id=%s real_workers=%d tracker_worker_id=%s sum=1): %s",
+            self.lb_id,
             self.num_workers,
             self.latency_tracker_worker_id,
             [round(value, 6) for value in normalized],

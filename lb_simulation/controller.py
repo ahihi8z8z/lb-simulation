@@ -7,7 +7,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 from .lb_control_modules import WrrLpControlParams, create_load_balancer_control_module
 from .latency_tracker import LatencyTrackerWorker
@@ -292,6 +292,8 @@ class LoadBalancerController:
         self.rng = rng or random.Random()
         self.control_mode = config.mode
         self.completion_count = 0
+        self.class_load_balancers: Dict[int, "LoadBalancer"] = {}
+        self.latency_trackers_by_class: Dict[int, LatencyTrackerWorker] = {}
 
         requested = config.latency_tracker.enabled
         self.latency_tracker_enabled = bool(requested)
@@ -316,17 +318,6 @@ class LoadBalancerController:
                 "Policy 'weighted_round_robin' with wrr.mode='lp_latency' requires "
                 "latency_tracker.enabled=true in controller config."
             )
-
-        self.latency_tracker: Optional[LatencyTrackerWorker]
-        if self.latency_tracker_enabled:
-            self.latency_tracker = LatencyTrackerWorker(
-                num_workers=num_workers,
-                tracker_worker_id=self.tracker_worker_id,
-                config=config.latency_tracker,
-                rng=random.Random(self.rng.randrange(1, 2**31)),
-            )
-        else:
-            self.latency_tracker = None
 
         if (self.policy == "weighted_round_robin") and (self.config.wrr.mode == "lp_latency"):
             self.lb_control_module = create_load_balancer_control_module(
@@ -354,34 +345,55 @@ class LoadBalancerController:
             self.lb_control_module.name,
         )
 
-    def initialize(self, lb: "LoadBalancer") -> None:
-        if self.latency_tracker is not None:
-            lb.configure_latency_tracker(
-                tracker_worker_id=self.latency_tracker.tracker_worker_id,
-                should_redirect=self.latency_tracker.should_redirect,
-            )
-            for worker_id, estimate in enumerate(self.latency_tracker.estimates):
-                lb.set_latency_estimate(worker_id, estimate, feedback_count=0)
+    def initialize(self, lbs_by_class: Mapping[int, "LoadBalancer"]) -> None:
+        self.class_load_balancers = {
+            int(class_id): lb for class_id, lb in lbs_by_class.items()
+        }
+        self.latency_trackers_by_class = {}
+        if not self.class_load_balancers:
+            raise ValueError("Controller requires at least one load balancer instance.")
 
-        if self.config.wrr.weights is not None:
-            lb.set_worker_weights(self.config.wrr.weights)
-        self.lb_control_module.initialize(lb)
-        logger.info("Controller initialized into load balancer")
+        for class_id, lb in self.class_load_balancers.items():
+            class_tracker: Optional[LatencyTrackerWorker] = None
+            if self.latency_tracker_enabled:
+                class_tracker = LatencyTrackerWorker(
+                    num_workers=self.num_workers,
+                    tracker_worker_id=self.tracker_worker_id,
+                    config=self.config.latency_tracker,
+                    rng=random.Random(self.rng.randrange(1, 2**31)),
+                )
+                self.latency_trackers_by_class[class_id] = class_tracker
+                lb.configure_latency_tracker(
+                    tracker_worker_id=class_tracker.tracker_worker_id,
+                    should_redirect=class_tracker.should_redirect,
+                )
+                for worker_id, estimate in enumerate(class_tracker.estimates):
+                    lb.set_latency_estimate(worker_id, estimate, feedback_count=0)
+
+            if self.config.wrr.weights is not None:
+                lb.set_worker_weights(self.config.wrr.weights)
+
+        self.lb_control_module.initialize(self.class_load_balancers)
+        logger.info(
+            "Controller initialized into %d load balancers",
+            len(self.class_load_balancers),
+        )
 
     def is_latency_tracker_worker(self, worker_id: int) -> bool:
-        return (
-            self.latency_tracker is not None
-            and worker_id == self.latency_tracker.tracker_worker_id
-        )
+        return self.latency_tracker_enabled and (worker_id == self.tracker_worker_id)
 
     def forward_via_latency_tracker(
         self,
         request: Request,
         selected_worker_id: Optional[int] = None,
     ) -> int:
-        if self.latency_tracker is None:
-            raise RuntimeError("Latency tracker is not enabled.")
-        worker_id = self.latency_tracker.pick_forward_worker(
+        class_id = int(request.class_id)
+        class_tracker = self.latency_trackers_by_class.get(class_id)
+        if class_tracker is None:
+            raise RuntimeError(
+                f"Latency tracker is not enabled for class_id={class_id}."
+            )
+        worker_id = class_tracker.pick_forward_worker(
             request,
             selected_worker_id=selected_worker_id,
         )
@@ -398,22 +410,25 @@ class LoadBalancerController:
         worker_id: int,
         latency: float,
         latency_tracked: bool,
-        lb: "LoadBalancer",
     ) -> None:
         self.completion_count += 1
-        if latency_tracked and self.latency_tracker is not None:
-            self.latency_tracker.observe(worker_id, latency)
-            lb.set_latency_estimate(
+        class_id = int(request.class_id)
+        class_lb = self.class_load_balancers.get(class_id)
+        if class_lb is None:
+            raise RuntimeError(f"No load balancer found for class_id={class_id}.")
+        class_tracker = self.latency_trackers_by_class.get(class_id)
+        if latency_tracked and (class_tracker is not None):
+            class_tracker.observe(worker_id, latency)
+            class_lb.set_latency_estimate(
                 worker_id,
-                self.latency_tracker.estimates[worker_id],
-                self.latency_tracker.sample_counts[worker_id],
+                class_tracker.estimates[worker_id],
+                class_tracker.sample_counts[worker_id],
             )
         self.lb_control_module.on_request_complete(
             request=request,
             worker_id=worker_id,
             latency=latency,
             latency_tracked=latency_tracked,
-            lb=lb,
         )
         logger.debug(
             "Completion processed rid=%d worker=%d tracked=%s latency=%.4f",
@@ -423,38 +438,94 @@ class LoadBalancerController:
             latency,
         )
 
-    def summarize(self, lb: "LoadBalancer") -> Dict[str, object]:
+    def summarize(self) -> Dict[str, object]:
+        sorted_lb_items = sorted(self.class_load_balancers.items(), key=lambda item: item[0])
+        sorted_tracker_items = sorted(
+            self.latency_trackers_by_class.items(), key=lambda item: item[0]
+        )
+        if sorted_lb_items:
+            _, first_lb = sorted_lb_items[0]
+            legacy_wrr_weights = [float(value) for value in first_lb.worker_weights]
+        else:
+            legacy_wrr_weights = []
         summary: Dict[str, object] = {
             "mode": self.control_mode,
             "policy": self.policy,
             "completions_seen": self.completion_count,
+            "lb_count": len(sorted_lb_items),
             "wrr_control_mode": self.config.wrr.mode,
             "lb_control_module": self.lb_control_module.name,
-            "wrr_weights": [float(value) for value in lb.worker_weights],
-            "latency_tracker_enabled": self.latency_tracker is not None,
+            "wrr_weights": legacy_wrr_weights,
+            "wrr_weights_by_class": {
+                str(class_id): [float(value) for value in lb.worker_weights]
+                for class_id, lb in sorted_lb_items
+            },
+            "latency_tracker_enabled": self.latency_tracker_enabled,
         }
-        summary.update(self.lb_control_module.summarize(lb))
+        summary.update(self.lb_control_module.summarize(self.class_load_balancers))
 
-        if self.latency_tracker is not None:
-            summary["track_decisions"] = self.latency_tracker.redirect_decisions
-            summary["track_redirected"] = self.latency_tracker.redirected_requests
-            summary["latency_sample_rate"] = float(
-                self.latency_tracker.redirect_rate
+        if sorted_tracker_items:
+            track_decisions_total = sum(
+                tracker.redirect_decisions for _, tracker in sorted_tracker_items
             )
-            summary["latency_tracker_ewma_gamma"] = self.latency_tracker.ewma_gamma
-            summary["latency_tracker_worker_id"] = self.latency_tracker.tracker_worker_id
-            summary["latency_tracker_dispatches"] = lb.latency_tracker_dispatches
-            summary["latency_tracker_inflight"] = lb.latency_tracker_inflight
-            summary["latency_redirect_policy"] = {
-                "name": self.latency_tracker.redirect_policy_name,
-                "params": dict(self.latency_tracker.redirect_policy_params),
+            track_redirected_total = sum(
+                tracker.redirected_requests for _, tracker in sorted_tracker_items
+            )
+            latency_samples_total = sum(
+                tracker.sampled_requests for _, tracker in sorted_tracker_items
+            )
+            track_decisions_by_class = {
+                str(class_id): int(tracker.redirect_decisions)
+                for class_id, tracker in sorted_tracker_items
             }
-            summary["latency_samples_total"] = self.latency_tracker.sampled_requests
-            summary["latency_samples_by_worker"] = list(self.latency_tracker.sample_counts)
-            summary["latency_estimate_by_worker"] = list(self.latency_tracker.estimates)
+            track_redirected_by_class = {
+                str(class_id): int(tracker.redirected_requests)
+                for class_id, tracker in sorted_tracker_items
+            }
+            summary["track_decisions"] = track_decisions_total
+            summary["track_redirected"] = track_redirected_total
+            summary["track_decisions_by_class"] = track_decisions_by_class
+            summary["track_redirected_by_class"] = track_redirected_by_class
+            summary["latency_sample_rate"] = float(sorted_tracker_items[0][1].redirect_rate)
+            summary["latency_tracker_ewma_gamma"] = float(sorted_tracker_items[0][1].ewma_gamma)
+            summary["latency_tracker_worker_id"] = sorted_tracker_items[0][1].tracker_worker_id
+            summary["latency_tracker_dispatches"] = sum(
+                lb.latency_tracker_dispatches for _, lb in sorted_lb_items
+            )
+            summary["latency_tracker_inflight"] = sum(
+                lb.latency_tracker_inflight for _, lb in sorted_lb_items
+            )
+            summary["latency_redirect_policy"] = {
+                "name": sorted_tracker_items[0][1].redirect_policy_name,
+                "params": dict(sorted_tracker_items[0][1].redirect_policy_params),
+            }
+            summary["latency_samples_total"] = latency_samples_total
+            sample_counts_by_class = {
+                str(class_id): list(tracker.sample_counts)
+                for class_id, tracker in sorted_tracker_items
+            }
+            estimates_by_class = {
+                str(class_id): list(tracker.estimates)
+                for class_id, tracker in sorted_tracker_items
+            }
+            summary["latency_samples_by_worker_and_class"] = sample_counts_by_class
+            summary["latency_estimate_by_worker_and_class"] = estimates_by_class
+            aggregated_samples = [0 for _ in range(self.num_workers)]
+            aggregated_estimates = [0.0 for _ in range(self.num_workers)]
+            for _, tracker in sorted_tracker_items:
+                for worker_id in range(self.num_workers):
+                    aggregated_samples[worker_id] += int(tracker.sample_counts[worker_id])
+                    aggregated_estimates[worker_id] += float(tracker.estimates[worker_id])
+            tracker_count = float(len(sorted_tracker_items))
+            summary["latency_samples_by_worker"] = aggregated_samples
+            summary["latency_estimate_by_worker"] = [
+                value / tracker_count for value in aggregated_estimates
+            ]
         else:
             summary["track_decisions"] = 0
             summary["track_redirected"] = 0
+            summary["track_decisions_by_class"] = {}
+            summary["track_redirected_by_class"] = {}
             summary["latency_sample_rate"] = 0.0
             summary["latency_tracker_ewma_gamma"] = 0.0
             summary["latency_tracker_worker_id"] = None
@@ -464,6 +535,8 @@ class LoadBalancerController:
             summary["latency_samples_total"] = 0
             summary["latency_samples_by_worker"] = []
             summary["latency_estimate_by_worker"] = []
+            summary["latency_samples_by_worker_and_class"] = {}
+            summary["latency_estimate_by_worker_and_class"] = {}
 
         logger.info("Controller summary generated")
         return summary

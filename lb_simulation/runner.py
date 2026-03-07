@@ -213,12 +213,18 @@ def run_simulation(
         detail_writer.open()
         logger.info("Detail metrics enabled at %s", detail_path)
 
-    load_balancer = LoadBalancer(
-        num_workers=num_workers,
-        policy=normalized_policy,
-        rng=rng,
-    )
-    controller.initialize(load_balancer)
+    load_balancers_by_class: Dict[int, LoadBalancer] = {}
+    for spec in class_specs:
+        class_id = int(spec.class_id)
+        if class_id in load_balancers_by_class:
+            raise ValueError(f"Duplicate service class id: {class_id}")
+        load_balancers_by_class[class_id] = LoadBalancer(
+            num_workers=num_workers,
+            policy=normalized_policy,
+            lb_id=f"class_{class_id}",
+            rng=random.Random(rng.randrange(1, 2**31)),
+        )
+    controller.initialize(load_balancers_by_class)
 
     def on_complete(
         request: Request,
@@ -231,7 +237,6 @@ def run_simulation(
             worker_id=worker_id,
             latency=latency,
             latency_tracked=latency_tracked,
-            lb=load_balancer,
         )
 
     inference_pool = InferencePool(
@@ -243,38 +248,48 @@ def run_simulation(
         rng=rng,
     )
 
-    def _build_detail_state() -> Optional[Dict[str, object]]:
+    def _build_detail_state(request: Request) -> Optional[Dict[str, object]]:
         if not detail:
             return None
+        class_id = int(request.class_id)
+        class_lb = load_balancers_by_class.get(class_id)
+        if class_lb is None:
+            raise ValueError(f"No load balancer found for class_id={class_id}")
         lb_state = {
-            "inflight": list(load_balancer.inflight),
-            "lat_ewma": list(load_balancer.lat_ewma),
-            "worker_weights": list(load_balancer.worker_weights),
-            "penalty": list(load_balancer.penalty),
-            "feedback_count": list(load_balancer.feedback_count),
+            "class_id": class_id,
+            "inflight": list(class_lb.inflight),
+            "lat_ewma": list(class_lb.lat_ewma),
+            "worker_weights": list(class_lb.worker_weights),
+            "penalty": list(class_lb.penalty),
+            "feedback_count": list(class_lb.feedback_count),
         }
         lb_control_state: Dict[str, object] = {}
         if controller.lb_control_module is not None and controller.lb_control_module.name != "none":
-            lb_control_state = controller.lb_control_module.summarize(load_balancer)
+            lb_control_state = controller.lb_control_module.summarize(load_balancers_by_class)
         return {"lb_state": lb_state, "lb_control_state": lb_control_state}
 
     def on_arrival(request: Request) -> None:
-        detail_state = _build_detail_state()
-        lb_selected_worker_id = load_balancer.choose_worker(request)
+        class_id = int(request.class_id)
+        class_lb = load_balancers_by_class.get(class_id)
+        if class_lb is None:
+            raise ValueError(f"No load balancer found for class_id={class_id}")
+
+        detail_state = _build_detail_state(request)
+        lb_selected_worker_id = class_lb.choose_worker(request)
         if controller.is_latency_tracker_worker(lb_selected_worker_id):
             # The latency-tracker worker itself has zero service time and only forwards
             # to a real worker (RR or selected-worker mode, depending on policy).
-            selected_worker_id = load_balancer.consume_redirect_target(request.rid)
+            selected_worker_id = class_lb.consume_redirect_target(request.rid)
             forwarded_worker_id = controller.forward_via_latency_tracker(
                 request,
                 selected_worker_id=selected_worker_id,
             )
-            load_balancer.on_dispatch(lb_selected_worker_id)
-            load_balancer.on_dispatch(forwarded_worker_id)
+            class_lb.on_dispatch(lb_selected_worker_id)
+            class_lb.on_dispatch(forwarded_worker_id)
             inference_pool.dispatch(
                 request,
                 forwarded_worker_id,
-                load_balancer,
+                class_lb,
                 latency_tracked=True,
                 lb_completion_worker_ids=[
                     forwarded_worker_id,
@@ -295,11 +310,11 @@ def run_simulation(
             )
             return
 
-        load_balancer.on_dispatch(lb_selected_worker_id)
+        class_lb.on_dispatch(lb_selected_worker_id)
         inference_pool.dispatch(
             request,
             lb_selected_worker_id,
-            load_balancer,
+            class_lb,
             latency_tracked=False,
             lb_completion_worker_ids=[lb_selected_worker_id],
             lb_selected_worker_id=lb_selected_worker_id,
@@ -381,7 +396,7 @@ def run_simulation(
     summary["controller_config_snapshot_file"] = (
         str(controller_config_snapshot_path) if controller_config_snapshot_path else ""
     )
-    summary["controller"] = controller.summarize(load_balancer)
+    summary["controller"] = controller.summarize()
     summary_file = run_dir / "summary.json"
     summary["summary_file"] = str(summary_file)
     _write_json(summary_file, summary)
