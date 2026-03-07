@@ -156,6 +156,8 @@ Mapping trong simulator:
 - `job_size = Total tokens`
 - `model = Model`
 - `log_type = Log Type`
+- Với `trace_replay`, thời gian mô phỏng được chuẩn hóa theo mốc tương đối:
+  request đầu tiên của trace (sau khi lọc theo `model`/`log_type`) được xem là `t=0`.
 
 File config hỗ trợ 2 dạng:
 - object có key `classes`

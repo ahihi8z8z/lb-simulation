@@ -168,14 +168,18 @@ class TrafficGenerator:
         raise ValueError(f"Unsupported arrival_mode: {self.arrival_mode}")
 
     def _run_trace_replay(self):
+        if not self.trace_records:
+            return
+        base_t = self.trace_records[0].timestamp
         last_t = 0.0
         for record in self.trace_records:
-            if record.timestamp > self.t_end:
+            relative_t = max(0.0, record.timestamp - base_t)
+            if relative_t > self.t_end:
                 break
-            delta = max(0.0, record.timestamp - last_t)
+            delta = max(0.0, relative_t - last_t)
             if delta > 0:
                 yield self.env.timeout(delta)
-            last_t = record.timestamp
+            last_t = relative_t
             for _ in range(self.trace_traffic_scale):
                 self.on_request(
                     self._build_request(
@@ -495,16 +499,18 @@ def load_service_class_config(path: Path, t_end: float) -> List[ServiceClassTraf
                     UserWarning,
                     stacklevel=2,
                 )
-            elif not any(record.timestamp <= t_end for record in trace_records):
-                warnings.warn(
+            else:
+                first_ts = trace_records[0].timestamp
+                last_relative_ts = max(0.0, trace_records[-1].timestamp - first_ts)
+                logger.info(
                     (
-                        f"classes[{idx}] (class_id={class_id}) matched "
-                        f"{len(trace_records)} records from {trace_path}, but none are "
-                        f"within t_end={t_end}. First matched timestamp is "
-                        f"{trace_records[0].timestamp}."
+                        "classes[%d] trace_replay uses relative time from first matched "
+                        "request: first_timestamp=%.3f relative_span=%.3f t_end=%.3f"
                     ),
-                    UserWarning,
-                    stacklevel=2,
+                    idx,
+                    first_ts,
+                    last_relative_ts,
+                    t_end,
                 )
 
         elif arrival_mode == "modeled_gamma":
