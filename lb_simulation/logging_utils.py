@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
-from typing import Dict
+from typing import Callable, Dict, Optional
 
 _LEVEL_MAP: Dict[str, int] = {
     "DEBUG": logging.DEBUG,
@@ -13,6 +14,32 @@ _LEVEL_MAP: Dict[str, int] = {
     "ERROR": logging.ERROR,
     "CRITICAL": logging.CRITICAL,
 }
+
+_SIM_TIME_PROVIDER: Optional[Callable[[], float]] = None
+
+
+class SimulationTimeFormatter(logging.Formatter):
+    """Formatter that renders record time from simulation clock instead of wallclock."""
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        del record, datefmt
+        provider = _SIM_TIME_PROVIDER
+        if provider is None:
+            return "t=     0.000s"
+        try:
+            value = float(provider())
+        except Exception:
+            return "t=         ?s"
+        if not math.isfinite(value):
+            return "t=         ?s"
+        return f"t={value:10.3f}s"
+
+
+def set_simulation_time_provider(provider: Optional[Callable[[], float]]) -> None:
+    """Set a callback that returns current simulation time in seconds."""
+
+    global _SIM_TIME_PROVIDER
+    _SIM_TIME_PROVIDER = provider
 
 
 def normalize_log_mode(raw: str) -> str:
@@ -47,9 +74,8 @@ def configure_logging(run_dir: Path, mode: str = "INFO") -> Path:
         except Exception:
             pass
 
-    formatter = logging.Formatter(
+    formatter = SimulationTimeFormatter(
         fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     stream_handler = logging.StreamHandler()

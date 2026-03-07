@@ -15,7 +15,11 @@ import simpy
 
 from .controller import LATENCY_AWARE_POLICIES, LoadBalancerController, load_controller_config
 from .inference_pool import InferencePool
-from .logging_utils import configure_logging, normalize_log_mode
+from .logging_utils import (
+    configure_logging,
+    normalize_log_mode,
+    set_simulation_time_provider,
+)
 from .load_balancer import (
     LoadBalancer,
     supported_policies,
@@ -103,6 +107,7 @@ def run_simulation(
 ) -> Dict[str, object]:
     """Run one simulation and return aggregate metrics."""
     wall_clock_start = time.perf_counter()
+    set_simulation_time_provider(None)
 
     if service_class_config is None:
         raise ValueError("service_class_config is required.")
@@ -129,6 +134,7 @@ def run_simulation(
 
     rng = random.Random(seed)
     env = simpy.Environment()
+    set_simulation_time_provider(lambda: env.now)
 
     class_specs = load_service_class_config(service_class_config, t_end=t_end)
     if not class_specs:
@@ -386,6 +392,7 @@ def run_simulation(
         summary["mean_latency"],
         summary["wall_time_total"],
     )
+    set_simulation_time_provider(None)
     return summary
 
 

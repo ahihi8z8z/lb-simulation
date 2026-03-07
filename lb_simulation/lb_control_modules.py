@@ -256,6 +256,10 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
             row_len = min(int(estimates.size), self.num_workers)
             cost_by_class[row_idx, :row_len] = estimates[:row_len]
         cost_by_class = np.clip(cost_by_class, a_min=1e-9, a_max=None)
+        logger.info(
+            "cost by class %s",
+            np.array2string(cost_by_class, precision=8, suppress_small=False),
+        )
 
         worker_loads = self._solve_lp(
             demand_by_class=demand_by_class,

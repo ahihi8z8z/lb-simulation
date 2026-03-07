@@ -162,7 +162,10 @@ class LoadBalancer:
         normalized = [value / total for value in raw_weights]
         self.worker_weights = normalized
         logger.info(
-            "Updated worker weights (sum=1): %s",
+            "Updated worker weights for main load balancer "
+            "(real_workers=%d tracker_worker_id=%s sum=1): %s",
+            self.num_workers,
+            self.latency_tracker_worker_id,
             [round(value, 6) for value in normalized],
         )
 
