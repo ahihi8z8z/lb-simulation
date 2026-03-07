@@ -8,6 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple, Type
 
+import numpy as np
 from scipy.optimize import linprog
 
 logger = logging.getLogger(__name__)
@@ -95,12 +96,14 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         super().__init__(num_workers=num_workers)
         self.params = params
         self.completion_count = 0
-        self.class_latency_estimates: Dict[int, List[float]] = {}
-        self.class_latency_samples: Dict[int, List[int]] = {}
+        self.class_latency_estimates: Dict[int, np.ndarray] = {}
+        self.class_latency_samples: Dict[int, np.ndarray] = {}
         self.class_completions_window: Dict[int, int] = defaultdict(int)
         self.lp_updates = 0
         self.latency_sampled_total = 0
-        self.next_update_time = max(1e-9, float(params.update_interval_seconds))
+        self.next_update_time = float(
+            np.clip(float(params.update_interval_seconds), a_min=1e-9, a_max=None)
+        )
 
     def on_request_complete(
         self,
@@ -111,7 +114,9 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         lb: "LoadBalancer",
     ) -> None:
         self.completion_count += 1
-        completion_time = max(0.0, float(request.t_arrival) + float(latency))
+        completion_time = float(
+            np.clip(float(request.t_arrival) + float(latency), a_min=0.0, a_max=None)
+        )
         class_id = int(request.class_id)
         self.class_completions_window[class_id] += 1
 
@@ -120,16 +125,18 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
 
         estimates = self.class_latency_estimates.get(class_id)
         if estimates is None:
-            estimates = [self.params.init_latency_estimate for _ in range(self.num_workers)]
+            estimates = np.full(self.num_workers, self.params.init_latency_estimate, dtype=float)
             self.class_latency_estimates[class_id] = estimates
         samples = self.class_latency_samples.get(class_id)
         if samples is None:
-            samples = [0 for _ in range(self.num_workers)]
+            samples = np.zeros(self.num_workers, dtype=int)
             self.class_latency_samples[class_id] = samples
 
-        previous = estimates[worker_id]
+        previous = float(estimates[worker_id])
         gamma = self.params.lp_ewma_gamma
-        estimates[worker_id] = max(1e-9, (1.0 - gamma) * previous + gamma * latency)
+        estimates[worker_id] = float(
+            np.clip((1.0 - gamma) * previous + gamma * latency, a_min=1e-9, a_max=None)
+        )
         samples[worker_id] += 1
         self.latency_sampled_total += 1
 
@@ -138,20 +145,14 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
             self.next_update_time += self.params.update_interval_seconds
 
     def _normalize_weights(self, worker_loads: Sequence[float]) -> List[float]:
-        total = sum(max(0.0, float(value)) for value in worker_loads)
-        if total <= 0:
-            candidate = [1.0 for _ in range(self.num_workers)]
+        loads = np.clip(np.asarray(worker_loads, dtype=float), a_min=0.0, a_max=None)
+        total = float(loads.sum())
+        if total <= 0.0:
+            candidate = np.ones(self.num_workers, dtype=float)
         else:
-            candidate = [
-                max(1e-9, (max(0.0, float(value)) / total) * self.num_workers)
-                for value in worker_loads
-            ]
-
-        clipped = [
-            min(max(value, self.params.min_weight), self.params.max_weight)
-            for value in candidate
-        ]
-        return clipped
+            candidate = np.clip((loads / total) * float(self.num_workers), a_min=1e-9, a_max=None)
+        clipped = np.clip(candidate, self.params.min_weight, self.params.max_weight)
+        return clipped.tolist()
 
     def _solve_lp(
         self,
@@ -162,44 +163,48 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         worker_count = self.num_workers
         if (service_count <= 0) or (worker_count <= 0):
             return [0.0 for _ in range(worker_count)]
-        total_demand = sum(max(0.0, demand) for _, demand in demand_by_class)
+        demand = np.clip(
+            np.asarray([float(raw_demand) for _, raw_demand in demand_by_class], dtype=float),
+            a_min=0.0,
+            a_max=None,
+        )
+        total_demand = float(demand.sum())
         if total_demand <= 0:
             return [0.0 for _ in range(worker_count)]
 
-        c: List[float] = []
-        for class_idx in range(service_count):
-            demand = demand_by_class[class_idx][1]
-            for worker_idx in range(worker_count):
-                # Minimize system-wide mean latency:
-                # sum_c,w P(class=c) * cost[c,w] * x[c,w], where P(c)=demand[c]/total_demand.
-                c.append(
-                    (demand / total_demand)
-                    * max(1e-9, float(cost_by_class[class_idx][worker_idx]))
-                )
+        cost = np.asarray(cost_by_class, dtype=float)
+        if cost.shape != (service_count, worker_count):
+            raise ValueError(
+                "cost_by_class shape mismatch: "
+                f"expected ({service_count}, {worker_count}), got {cost.shape}"
+            )
+        cost = np.maximum(cost, 1e-9)
 
+        # Minimize system-wide mean latency:
+        # sum_c,w P(class=c) * cost[c,w] * x[c,w], where P(c)=demand[c]/total_demand.
+        class_prob = demand / total_demand
+        c = (class_prob[:, None] * cost).reshape(-1)
         variable_count = service_count * worker_count
-        a_eq = [[0.0 for _ in range(variable_count)] for _ in range(service_count)]
-        for class_idx in range(service_count):
-            base = class_idx * worker_count
-            for worker_idx in range(worker_count):
-                a_eq[class_idx][base + worker_idx] = 1.0
-        b_eq = [1.0 for _ in range(service_count)]
+        a_eq = np.kron(np.eye(service_count), np.ones((1, worker_count)))
+        b_eq = np.ones(service_count, dtype=float)
 
         target = total_demand / worker_count
         epsilon = self.params.lp_balance_tolerance * target
-        lower = max(0.0, target - epsilon)
+        lower = float(np.clip(target - epsilon, a_min=0.0, a_max=None))
         upper = target + epsilon
 
-        a_ub: List[List[float]] = []
-        b_ub: List[float] = []
-        for worker_idx in range(worker_count):
-            row = [0.0 for _ in range(variable_count)]
-            for class_idx in range(service_count):
-                row[class_idx * worker_count + worker_idx] = demand_by_class[class_idx][1]
-            a_ub.append(row)
-            b_ub.append(upper)
-            a_ub.append([-value for value in row])
-            b_ub.append(-lower)
+        class_offsets = np.arange(service_count) * worker_count
+        worker_ids = np.arange(worker_count)
+        selected_indices = class_offsets[None, :] + worker_ids[:, None]
+        a_ub_upper = np.zeros((worker_count, variable_count), dtype=float)
+        a_ub_upper[worker_ids[:, None], selected_indices] = demand[None, :]
+        a_ub = np.vstack((a_ub_upper, -a_ub_upper))
+        b_ub = np.concatenate(
+            (
+                np.full(worker_count, upper, dtype=float),
+                np.full(worker_count, -lower, dtype=float),
+            )
+        )
 
         result = linprog(
             c=c,
@@ -207,7 +212,7 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
             b_eq=b_eq,
             A_ub=a_ub,
             b_ub=b_ub,
-            bounds=[(0.0, 1.0) for _ in range(variable_count)],
+            bounds=(0.0, 1.0),
             method="highs",
         )
         if (not result.success) or (result.x is None):
@@ -216,13 +221,9 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
                 f"status={result.status}, message={result.message}"
             )
 
-        worker_loads = [0.0 for _ in range(worker_count)]
-        for class_idx in range(service_count):
-            demand = demand_by_class[class_idx][1]
-            for worker_idx in range(worker_count):
-                value = float(result.x[class_idx * worker_count + worker_idx])
-                worker_loads[worker_idx] += demand * max(0.0, value)
-        return worker_loads
+        allocation = np.maximum(result.x.reshape(service_count, worker_count), 0.0)
+        worker_loads = (demand[:, None] * allocation).sum(axis=0)
+        return worker_loads.tolist()
 
     def _maybe_update_weights(self, lb: "LoadBalancer") -> None:
         if not self.class_completions_window:
@@ -241,15 +242,20 @@ class WrrLpLatencyControlModule(LoadBalancerControlModule):
         if not demand_by_class:
             return
 
-        cost_by_class: List[List[float]] = []
-        for class_id, _ in demand_by_class:
+        default_cost_row = np.maximum(
+            np.asarray(lb.lat_ewma[: self.num_workers], dtype=float),
+            1e-9,
+        )
+        class_count = len(demand_by_class)
+        cost_by_class = np.tile(default_cost_row, (class_count, 1))
+        for row_idx, (class_id, _) in enumerate(demand_by_class):
             estimates = self.class_latency_estimates.get(class_id)
             if estimates is None:
-                estimates = [max(1e-9, value) for value in lb.lat_ewma]
-            row = [max(1e-9, float(value)) for value in estimates[: self.num_workers]]
-            if len(row) < self.num_workers:
-                row.extend([max(1e-9, value) for value in lb.lat_ewma[len(row) :]])
-            cost_by_class.append(row)
+                continue
+
+            row_len = min(int(estimates.size), self.num_workers)
+            cost_by_class[row_idx, :row_len] = estimates[:row_len]
+        cost_by_class = np.clip(cost_by_class, a_min=1e-9, a_max=None)
 
         worker_loads = self._solve_lp(
             demand_by_class=demand_by_class,
