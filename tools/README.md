@@ -47,8 +47,19 @@ python3 tools/plot_log_comparison.py \
   --output-dir logs/comparison_plots
 ```
 
+Hoặc để tool tự đặt label:
+```bash
+python3 tools/plot_log_comparison.py \
+  --run logs/run-YYYYMMDD-HHMMSS \
+  --run logs/run-YYYYMMDD-HHMMSS \
+  --output-dir logs/comparison_plots
+```
+
 Tùy chọn:
-- `--run`: input dạng `<log_folder>=<label>`, lặp lại nhiều lần để so sánh.
+- `--run`: input dạng `<log_folder>` hoặc `<log_folder>=<label>`, lặp lại nhiều lần để so sánh.
+  - Nếu không truyền label, tool tự suy ra label từ policy load balancer.
+  - Riêng `weighted_round_robin`, label tự động có thêm control mode/module
+    (ví dụ: `weighted_round_robin:lp_latency`, `weighted_round_robin:separate_lp`).
 - `--output-dir`: thư mục output ảnh (mặc định `logs/comparison_plots`)
 - `--dpi`: độ phân giải ảnh (mặc định `150`)
 

@@ -9,7 +9,7 @@ import json
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 try:
     import matplotlib.pyplot as plt
@@ -82,6 +82,42 @@ def _summary_entity_has_all_metrics(entity: Mapping[str, object]) -> bool:
     return all(metric in entity for metric in METRICS)
 
 
+def _load_json_dict(path: Path) -> Dict[str, object]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _infer_label(
+    run_dir: Path,
+    summary: Mapping[str, object],
+    run_config: Mapping[str, object],
+) -> str:
+    policy_raw = summary.get("policy", run_config.get("policy", ""))
+    policy = str(policy_raw).strip().lower()
+    if not policy:
+        return run_dir.name
+
+    if policy != "weighted_round_robin":
+        return policy
+
+    controller_block = summary.get("controller")
+    control_name = ""
+    if isinstance(controller_block, dict):
+        wrr_mode = str(controller_block.get("wrr_control_mode", "")).strip().lower()
+        lb_module = str(controller_block.get("lb_control_module", "")).strip().lower()
+        if wrr_mode:
+            control_name = wrr_mode
+        elif lb_module:
+            control_name = lb_module
+    if not control_name:
+        control_name = "none"
+    return f"{policy}:{control_name}"
+
+
 def _load_detail_stats(
     detail_csv: Path,
 ) -> Tuple[Dict[str, float], Dict[str, Dict[str, float]], Dict[str, Dict[str, float]]]:
@@ -139,13 +175,14 @@ def _coerce_metric_block(
     return out
 
 
-def _load_run_metrics(run_dir: Path, label: str) -> RunMetrics:
+def _load_run_metrics(run_dir: Path, label_override: Optional[str]) -> RunMetrics:
     summary_path = run_dir / "summary.json"
     if not summary_path.exists():
         raise ValueError(f"Missing summary file: {summary_path}")
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    if not isinstance(summary, dict):
+    summary = _load_json_dict(summary_path)
+    if not summary:
         raise ValueError(f"Invalid summary format: {summary_path}")
+    run_config = _load_json_dict(run_dir / "run_config.json")
 
     service_cfg_path = run_dir / "service_class_config.json"
     worker_cfg_path = run_dir / "worker_class_config.json"
@@ -203,7 +240,7 @@ def _load_run_metrics(run_dir: Path, label: str) -> RunMetrics:
 
     return RunMetrics(
         run_dir=run_dir,
-        label=label,
+        label=(label_override or _infer_label(run_dir, summary, run_config)),
         system=system,
         service=service,
         worker=worker,
@@ -214,26 +251,40 @@ def _load_run_metrics(run_dir: Path, label: str) -> RunMetrics:
     )
 
 
-def _parse_run_specs(specs: Sequence[str]) -> List[Tuple[Path, str]]:
-    parsed: List[Tuple[Path, str]] = []
-    seen_labels: Dict[str, int] = {}
+def _parse_run_specs(specs: Sequence[str]) -> List[Tuple[Path, Optional[str]]]:
+    parsed: List[Tuple[Path, Optional[str]]] = []
     for spec in specs:
-        if "=" not in spec:
-            raise ValueError(f"Invalid --run '{spec}'. Expected format: <log_folder>=<label>")
-        raw_dir, raw_label = spec.split("=", 1)
-        run_dir = Path(raw_dir.strip())
-        label = raw_label.strip()
-        if (not run_dir) or (not label):
-            raise ValueError(f"Invalid --run '{spec}'. Both folder and label are required.")
-        if label in seen_labels:
-            seen_labels[label] += 1
-            label = f"{label}_{seen_labels[label]}"
-        else:
-            seen_labels[label] = 1
-        parsed.append((run_dir, label))
+        text = spec.strip()
+        if not text:
+            raise ValueError("Invalid empty --run value.")
+        if "=" in text:
+            raw_dir, raw_label = text.split("=", 1)
+            run_dir = Path(raw_dir.strip())
+            label = raw_label.strip()
+            if (not str(run_dir).strip()) or (not label):
+                raise ValueError(
+                    f"Invalid --run '{spec}'. When using '=', both folder and label are required."
+                )
+            parsed.append((run_dir, label))
+            continue
+        run_dir = Path(text)
+        if not str(run_dir).strip():
+            raise ValueError(f"Invalid --run '{spec}'.")
+        parsed.append((run_dir, None))
     if len(parsed) < 2:
         raise ValueError("At least 2 --run inputs are required for comparison.")
     return parsed
+
+
+def _dedupe_labels(runs: Sequence[RunMetrics]) -> None:
+    seen_labels: Dict[str, int] = {}
+    for item in runs:
+        label = item.label
+        if label in seen_labels:
+            seen_labels[label] += 1
+            item.label = f"{label}_{seen_labels[label]}"
+        else:
+            seen_labels[label] = 1
 
 
 def _validate_compatible_runs(runs: Sequence[RunMetrics]) -> None:
@@ -351,14 +402,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Compare latency metrics across multiple log folders. "
-            "Use repeated --run <log_folder>=<label>."
+            "Use repeated --run <log_folder> or <log_folder>=<label>."
         )
     )
     parser.add_argument(
         "--run",
         action="append",
         required=True,
-        help="Input run in format <log_folder>=<label>. Repeat for multiple runs.",
+        help=(
+            "Input run in format <log_folder> or <log_folder>=<label>. "
+            "If label is omitted, tool infers label from policy "
+            "(and for WRR includes control mode/module)."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -379,7 +434,11 @@ def main() -> None:
     args = parse_args()
     try:
         specs = _parse_run_specs(args.run)
-        runs = [_load_run_metrics(run_dir=run_dir, label=label) for run_dir, label in specs]
+        runs = [
+            _load_run_metrics(run_dir=run_dir, label_override=label)
+            for run_dir, label in specs
+        ]
+        _dedupe_labels(runs)
         _validate_compatible_runs(runs)
     except ValueError as error:
         raise SystemExit(str(error)) from error
