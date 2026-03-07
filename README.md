@@ -211,7 +211,7 @@ Service models built-in:
 - `contention_lognormal`: `S = (a+b*z)*(1+c*n_local)*(1+d*max(0,N-n0))*LogNormal(0,sigma)`
 - `linear_lognormal`: `S = (a+b*z)*LogNormal(0,sigma)`
 - `fixed`: `S = service_time` (hằng số)
-- `fixed_linear`: mô hình throughput thay đổi tuyến tính theo `job_size` (service time được suy ra từ throughput này).
+- `fixed_linear`: `S = clip(a + b*job_size, min, max)` (service time tuyến tính theo `job_size` có chặn biên).
 
 Ví dụ:
 ```json
@@ -240,7 +240,7 @@ Ví dụ:
     },
     {
       "class_id": 3,
-      "description": "Worker fixed_linear để mô hình throughput tuyến tính theo job_size",
+      "description": "Worker fixed_linear với service time tuyến tính theo job_size",
       "count": 1,
       "service_model": "fixed_linear",
       "params": { "a": 0.03, "b": 0.002, "min": 0.001, "max": 5.0 }

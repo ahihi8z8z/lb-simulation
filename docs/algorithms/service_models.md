@@ -43,14 +43,13 @@ Các model đều implement `sample_service_time(context, rng)` với:
 
 ## `fixed_linear`
 - Công thức trong code:
-  - `den = clip(a + b*job_size, min, max)`
-  - `S = 1 / den`
+  - `S = clip(a + b*job_size, min, max)`
 - Ý nghĩa:
-  - Mô hình thông lượng tuyến tính theo `job_size`, rồi đổi sang service time bằng nghịch đảo.
+  - Service time tăng tuyến tính theo `job_size`.
   - Có chặn biên để tránh cực trị.
 - Biến implement chính:
-  - `context.job_size`: input để tính `denominator`.
+  - `context.job_size`: input để tính `service_time`.
   - `self.a`, `self.b`, `self.min_s`, `self.max_s`: tham số model.
-  - `denominator`: giá trị sau khi clip, dùng để tính `1.0 / denominator`.
+  - `service_time`: giá trị sau khi clip và dùng trực tiếp làm service time.
 
 Quay lại: [algorithms index](README.md) · [docs/README](../README.md)

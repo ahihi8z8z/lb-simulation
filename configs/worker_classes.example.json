@@ -37,7 +37,7 @@
     },
     {
       "class_id": 3,
-      "description": "Worker fixed_linear để mô hình throughput tuyến tính theo job_size",
+      "description": "Worker fixed_linear với service time tuyến tính theo job_size",
       "count": 1,
       "service_model": "fixed_linear",
       "params": {
