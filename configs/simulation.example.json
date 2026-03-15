@@ -1,0 +1,99 @@
+{
+  "service_class": {
+    "classes": [
+      {
+        "class_id": 0,
+        "description": "Replay ChatGPT conversation traffic from the BurstGPT trace",
+        "arrival_mode": "trace_replay",
+        "model": "ChatGPT",
+        "log_type": "Conversation log",
+        "trace_file": "../traces/BurstGPT_without_fails_1.csv",
+        "traffic_scale": 1
+      },
+      {
+        "class_id": 1,
+        "description": "Gamma- and Zipf-modeled traffic for a GPT-4 API log",
+        "arrival_mode": "modeled_gamma",
+        "model": "GPT-4",
+        "log_type": "API log",
+        "gamma_params_file": "gamma_params.example.csv",
+        "zipf_params_file": "zipf_params.example.txt",
+        "scale_gamma": 1.0,
+        "scale_beta": 1.0,
+        "seed": 202401,
+        "response_linear": {
+          "slope": 0.7,
+          "intercept": 32.0
+        }
+      }
+    ]
+  },
+  "worker_class": {
+    "classes": [
+      {
+        "class_id": 0,
+        "description": "Heavy worker profile with local and global contention effects",
+        "count": 4,
+        "service_model": "contention_lognormal",
+        "queue_policy": "fcfs",
+        "queue_timeout_seconds": null,
+        "params": {
+          "a": 0.03,
+          "b": 0.002,
+          "c": 0.12,
+          "d": 0.015,
+          "sigma": 0.2,
+          "min_s": 0.001
+        }
+      },
+      {
+        "class_id": 1,
+        "description": "Linear worker profile for more stable latency behavior",
+        "count": 2,
+        "service_model": "linear_lognormal",
+        "queue_policy": "fcfs",
+        "params": {
+          "a": 0.04,
+          "b": 0.003,
+          "sigma": 0.1,
+          "min_s": 0.001
+        }
+      },
+      {
+        "class_id": 2,
+        "description": "Fixed worker profile with time proportional to job size",
+        "count": 2,
+        "service_model": "fixed",
+        "queue_policy": "fcfs",
+        "params": {
+          "service_time": 0.05
+        }
+      },
+      {
+        "class_id": 3,
+        "description": "Fixed-linear worker profile with service time linear in job size",
+        "count": 1,
+        "service_model": "fixed_linear",
+        "queue_policy": "fcfs",
+        "params": {
+          "a": 0.03,
+          "b": 0.002,
+          "min": 0.001,
+          "max": 5.0
+        }
+      }
+    ]
+  },
+  "controller": {
+    "latency_tracker": {
+      "init_estimate": 0.5,
+      "ewma_gamma": 0.1,
+      "redirect_policy": {
+        "name": "fixed_rate",
+        "params": {
+          "rate": 0.05
+        }
+      }
+    }
+  }
+}

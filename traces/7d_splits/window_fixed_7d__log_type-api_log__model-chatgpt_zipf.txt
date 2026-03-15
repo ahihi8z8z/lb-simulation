@@ -1,0 +1,12 @@
+input_csv=traces/7d_splits/window_fixed_7d__log_type-api_log__model-chatgpt.csv
+request_tokens_column=Request tokens
+sample_count=832700
+fit_status=ok
+distribution=truncated_discrete_zipf
+s=1.010000
+xmin=12
+max=4865
+search_s_min=1.01
+search_s_max=4.0
+coarse_step=0.02
+fine_step=0.002

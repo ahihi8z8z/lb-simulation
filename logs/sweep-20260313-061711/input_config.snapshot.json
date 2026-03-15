@@ -1,0 +1,759 @@
+{
+  "base_config": {
+    "controller": {
+      "latency_tracker": {
+        "ewma_gamma": 0.1,
+        "init_estimate": 0.0,
+        "redirect_policy": {
+          "name": "track_all"
+        }
+      },
+      "lp-wrr": {
+        "lp_balance_tolerance": 1,
+        "lp_ewma_gamma": 0.005,
+        "max_weight": 0.999,
+        "min_weight": 0.001,
+        "update_interval_seconds": 300.0
+      },
+      "sp-wrr": {
+        "lp_balance_tolerance": 1,
+        "lp_ewma_gamma": 0.005,
+        "max_weight": 0.999,
+        "min_weight": 0.001,
+        "update_interval_seconds": 300.0
+      }
+    },
+    "service_class": {
+      "classes": [
+        {
+          "arrival_mode": "modeled_gamma",
+          "class_id": 0,
+          "description": "Modeled traffic ChatGPT Conversation log",
+          "gamma_params_file": "traces/7d_splits/window_fixed_7d__log_type-conversation_log__model-chatgpt_gamma_windows.csv",
+          "log_type": "Conversation log",
+          "model": "ChatGPT",
+          "response_linear": {
+            "intercept": 367,
+            "slope": 0.2
+          },
+          "scale_beta": 0.25,
+          "scale_gamma": 1,
+          "seed": 42,
+          "zipf_params_file": "zipf_params.example.txt"
+        },
+        {
+          "arrival_mode": "modeled_gamma",
+          "class_id": 1,
+          "description": "Modeled traffic ChatGPT API log",
+          "gamma_params_file": "traces/7d_splits/window_fixed_7d__log_type-api_log__model-chatgpt_gamma_windows.csv",
+          "model": "ChatGPT",
+          "response_linear": {
+            "intercept": 367,
+            "slope": 0.2
+          },
+          "scale_beta": 1,
+          "scale_gamma": 1.0,
+          "seed": 43,
+          "zipf_params_file": "zipf_params.example.txt"
+        }
+      ]
+    },
+    "topology": {
+      "service_class_worker_ids": {
+        "0": [
+          1,
+          2,
+          3
+        ],
+        "1": [
+          0,
+          1,
+          2
+        ]
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "name": "std-0",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.0,
+              "2": 1.0,
+              "3": 1.0
+            },
+            "1": {
+              "0": 1.0,
+              "1": 1.0,
+              "2": 1.0
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 150.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 150.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 150.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 150.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "std-0.1",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.1,
+              "2": 0.9,
+              "3": 0.9
+            },
+            "1": {
+              "0": 1.1,
+              "1": 1.1,
+              "2": 0.9
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100 x 1.1",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 165.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100 x 1.1",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 165.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100 x 0.9",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 135.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100 x 0.9",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 135.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "std-0.22",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.1,
+              "2": 0.9,
+              "3": 0.7
+            },
+            "1": {
+              "0": 1.3,
+              "1": 1.1,
+              "2": 0.9
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100 x 1.3",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 195.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100 x 1.1",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 165.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100 x 0.9",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 135.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100 x 0.7",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 105.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "std-0.41",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.1,
+              "2": 0.8,
+              "3": 0.5
+            },
+            "1": {
+              "0": 1.6,
+              "1": 1.1,
+              "2": 0.8
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100 x 1.6",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 240.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100 x 1.1",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 165.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100 x 0.8",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 120.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100 x 0.5",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 75.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "std-0.55",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.2,
+              "2": 0.6,
+              "3": 0.4
+            },
+            "1": {
+              "0": 1.8,
+              "1": 1.2,
+              "2": 0.6
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100 x 1.8",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 270.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100 x 1.2",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 180.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100 x 0.6",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 90.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100 x 0.4",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 60.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "std-0.68",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.2,
+              "2": 0.7,
+              "3": 0.2
+            },
+            "1": {
+              "0": 1.9,
+              "1": 1.2,
+              "2": 0.7
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100 x 1.9",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 285.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100 x 1.2",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 180.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100 x 0.7",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 105.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100 x 0.2",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 30.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "std-0.80",
+      "override": {
+        "topology": {
+          "service_class_worker_weights": {
+            "0": {
+              "1": 1.2,
+              "2": 0.5,
+              "3": 0.1
+            },
+            "1": {
+              "0": 2.2,
+              "1": 1.2,
+              "2": 0.5
+            }
+          }
+        },
+        "worker_class": {
+          "classes": [
+            {
+              "class_id": 0,
+              "count": 1,
+              "description": "A100 x 2.2",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 330.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 1,
+              "count": 1,
+              "description": "A100 x 1.2",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 180.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 2,
+              "count": 1,
+              "description": "A100 x 0.5",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 75.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            },
+            {
+              "class_id": 3,
+              "count": 1,
+              "description": "A100 x 0.1",
+              "params": {
+                "max_concurrency": 4,
+                "processing_rate": 15.0
+              },
+              "queue_timeout_seconds": 300,
+              "service_model": "limited_processor_sharing"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "sweeps": {
+    "std-0": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    },
+    "std-0.1": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    },
+    "std-0.22": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    },
+    "std-0.41": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    },
+    "std-0.55": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    },
+    "std-0.68": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    },
+    "std-0.80": {
+      "controller.lp-wrr.lp_ewma_gamma": [
+        0.001,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "service_class.classes[1].scale_beta": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5,
+        5,
+        5.5,
+        6,
+        6.5,
+        7,
+        7.5,
+        8,
+        8.5,
+        9,
+        9.5,
+        10
+      ]
+    }
+  }
+}

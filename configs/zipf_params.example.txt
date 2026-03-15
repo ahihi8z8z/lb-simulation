@@ -1,0 +1,5 @@
+fit_status=ok
+distribution=truncated_discrete_zipf
+s=5
+xmin=1024
+max=2048
