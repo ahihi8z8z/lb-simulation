@@ -135,6 +135,7 @@ class InferencePool:
             job_size=request.job_size,
             latency=latency,
             service_time=service_time,
+            queueing_latency=queueing_latency,
             busy_time=busy_time,
         )
         if self.on_complete:

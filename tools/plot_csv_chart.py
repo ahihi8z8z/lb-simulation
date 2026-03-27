@@ -210,14 +210,26 @@ FALLBACK_BAR_STYLES = [
 LINE_SCALE_COMPOSITES = [
     CompositeLineSpec(
         name="scale",
-        ncols=3,
+        ncols=4,
         panels=(
             MetricSpec("mean_latency", "(a) Mean latency, std=0", "Latency (s)", scenario_std=0),
-            MetricSpec("p95_latency", "(b) P95 latency, std=0", "Latency (s)", scenario_std=0),
-            MetricSpec("outcomes.traffic.drop_rate", "(c) Drop ratio, std=0", "Drop ratio. (%)", transform=_to_percent, scenario_std=0),
-            MetricSpec("mean_latency", "(d) Mean latency, std=0.41", "Latency (s)", scenario_std=0.41),
-            MetricSpec("p95_latency", "(e) P95 latency, std=0.41", "Latency (s)", scenario_std=0.41),
-            MetricSpec("outcomes.traffic.drop_rate", "(f) Drop ratio, std=0.41", "Drop ratio (%)", transform=_to_percent, scenario_std=0.41),
+            MetricSpec(
+                "mean_queueing_latency",
+                "(b) Mean waiting time, std=0",
+                "Waiting time (s)",
+                scenario_std=0,
+            ),
+            MetricSpec("p95_latency", "(c) P95 latency, std=0", "Latency (s)", scenario_std=0),
+            MetricSpec("outcomes.traffic.drop_rate", "(d) Drop ratio, std=0", "Drop ratio (%)", transform=_to_percent, scenario_std=0),
+            MetricSpec("mean_latency", "(e) Mean latency, std=0.41", "Latency (s)", scenario_std=0.41),
+            MetricSpec(
+                "mean_queueing_latency",
+                "(f) Mean waiting time, std=0.41",
+                "Waiting time (s)",
+                scenario_std=0.41,
+            ),
+            MetricSpec("p95_latency", "(g) P95 latency, std=0.41", "Latency (s)", scenario_std=0.41),
+            MetricSpec("outcomes.traffic.drop_rate", "(h) Drop ratio, std=0.41", "Drop ratio (%)", transform=_to_percent, scenario_std=0.41),
         ),
     ),
 ]
@@ -226,10 +238,16 @@ LINE_SCALE_COMPOSITES = [
 LINE_STD_COMPOSITES = [
     CompositeLineSpec(
         name="std",
-        ncols=2,
+        ncols=3,
         panels=(
             MetricSpec("mean_latency", "(a) Mean latency", "Latency (s)",std_scale=10),
-            MetricSpec("p95_latency", "(b) P95 latency", "Latency (s)",std_scale=10),
+            MetricSpec(
+                "mean_queueing_latency",
+                "(b) Mean waiting time",
+                "Waiting time (s)",
+                std_scale=10,
+            ),
+            MetricSpec("p95_latency", "(c) P95 latency", "Latency (s)",std_scale=10),
         ),
     ),
 ]
@@ -237,7 +255,7 @@ LINE_STD_COMPOSITES = [
 BAR_COMPOSITES = [
     CompositeBarSpec(
         name="detail",
-        ncols=3,
+        ncols=4,
         panels=(
             BarPanelSpec(
                 title="(a) Mean latency, std=0",
@@ -248,7 +266,15 @@ BAR_COMPOSITES = [
                 snapshot_std=0,
             ),
             BarPanelSpec(
-                title="(b) P95 latency, std=0",
+                title="(b) Mean waiting time, std=0",
+                metric_col="mean_queueing_latency",
+                group_kind="service_queueing_latency_mean",
+                ylabel="Waiting time (s)",
+                snapshot_scale=10,
+                snapshot_std=0,
+            ),
+            BarPanelSpec(
+                title="(c) P95 latency, std=0",
                 metric_col="p95_latency",
                 group_kind="service_latency_p95",
                 ylabel="Latency (s)",
@@ -256,7 +282,7 @@ BAR_COMPOSITES = [
                 snapshot_std=0,
             ),
             BarPanelSpec(
-                title="(c) Instance utilization, std=0",
+                title="(d) Instance utilization, std=0",
                 metric_col="outcomes.dispersion.worker_utilization_max_gap",
                 group_kind="worker_utilization",
                 ylabel="Instance utilization (%)",
@@ -265,7 +291,7 @@ BAR_COMPOSITES = [
                 snapshot_std=0,
             ),
             BarPanelSpec(
-                title="(d) Mean latency, std=0.41",
+                title="(e) Mean latency, std=0.41",
                 metric_col="mean_latency",
                 group_kind="service_latency_mean",
                 ylabel="Latency (s)",
@@ -273,7 +299,15 @@ BAR_COMPOSITES = [
                 snapshot_std=0.41,
             ),
             BarPanelSpec(
-                title="(e) P95 latency, std=0.41",
+                title="(f) Mean waiting time, std=0.41",
+                metric_col="mean_queueing_latency",
+                group_kind="service_queueing_latency_mean",
+                ylabel="Waiting time (s)",
+                snapshot_scale=10,
+                snapshot_std=0.41,
+            ),
+            BarPanelSpec(
+                title="(g) P95 latency, std=0.41",
                 metric_col="p95_latency",
                 group_kind="service_latency_p95",
                 ylabel="Latency (s)",
@@ -281,7 +315,7 @@ BAR_COMPOSITES = [
                 snapshot_std=0.41,
             ),
             BarPanelSpec(
-                title="(f) Instance utilization, std=0.41",
+                title="(h) Instance utilization, std=0.41",
                 metric_col="outcomes.dispersion.worker_utilization_max_gap",
                 group_kind="worker_utilization",
                 ylabel="Instance utilization (%)",
@@ -1109,13 +1143,20 @@ def _bar_group_definition(
         "worker_latency_mean": ".mean",
         "worker_latency_p95": ".p95",
         "worker_latency_p99": ".p99",
+        "worker_queueing_latency_mean": ".mean",
+        "worker_queueing_latency_p95": ".p95",
+        "worker_queueing_latency_p99": ".p99",
         "worker_drop": ".drop_rate",
     }
     if group_kind in worker_metric_suffix:
         prefix = (
             "breakdown.worker.drop.worker_"
             if group_kind == "worker_drop"
-            else "breakdown.worker.latency.worker_"
+            else (
+                "breakdown.worker.queueing_latency.worker_"
+                if group_kind.startswith("worker_queueing_latency")
+                else "breakdown.worker.latency.worker_"
+            )
         )
         indexed = _discover_indexed_columns(df.columns, prefix, worker_metric_suffix[group_kind])
         columns = [column for _, column in indexed]
@@ -1126,13 +1167,20 @@ def _bar_group_definition(
         "service_latency_mean": ".mean",
         "service_latency_p95": ".p95",
         "service_latency_p99": ".p99",
+        "service_queueing_latency_mean": ".mean",
+        "service_queueing_latency_p95": ".p95",
+        "service_queueing_latency_p99": ".p99",
         "service_drop": ".drop_rate",
     }
     if group_kind in service_metric_suffix:
         prefix = (
             "breakdown.service.drop.class_"
             if group_kind == "service_drop"
-            else "breakdown.service.latency.class_"
+            else (
+                "breakdown.service.queueing_latency.class_"
+                if group_kind.startswith("service_queueing_latency")
+                else "breakdown.service.latency.class_"
+            )
         )
         indexed = _discover_indexed_columns(df.columns, prefix, service_metric_suffix[group_kind])
         columns = [column for _, column in indexed]
@@ -1141,6 +1189,9 @@ def _bar_group_definition(
             "service_latency_mean": "mean_latency",
             "service_latency_p95": "p95_latency",
             "service_latency_p99": "p99_latency",
+            "service_queueing_latency_mean": "mean_queueing_latency",
+            "service_queueing_latency_p95": "p95_queueing_latency",
+            "service_queueing_latency_p99": "p99_queueing_latency",
             "service_drop": "outcomes.traffic.drop_rate",
         }[group_kind]
         if overall_col in df.columns:

@@ -601,6 +601,10 @@ def _extract_summary_metric_columns(summary: Dict[str, object]) -> Dict[str, obj
         "outcomes.latency.median": summary.get("median_latency", 0.0),
         "outcomes.latency.p95": summary.get("p95_latency", 0.0),
         "outcomes.latency.p99": summary.get("p99_latency", 0.0),
+        "outcomes.queueing_latency.mean": summary.get("mean_queueing_latency", 0.0),
+        "outcomes.queueing_latency.median": summary.get("median_queueing_latency", 0.0),
+        "outcomes.queueing_latency.p95": summary.get("p95_queueing_latency", 0.0),
+        "outcomes.queueing_latency.p99": summary.get("p99_queueing_latency", 0.0),
         "outcomes.queueing.avg_queue_len": summary.get("avg_queue_len", 0.0),
         "outcomes.queueing.avg_global_inflight": summary.get("avg_global_inflight", 0.0),
         "outcomes.queueing.avg_utilization": summary.get("avg_utilization", 0.0),
@@ -659,6 +663,32 @@ def _extract_summary_metric_columns(summary: Dict[str, object]) -> Dict[str, obj
                     f"breakdown.worker.latency.worker_{worker_id}.{metric_key}"
                 ] = stats.get(metric_key, 0)
 
+    queueing_latency_by_class = summary.get("queueing_latency_by_class", {})
+    if isinstance(queueing_latency_by_class, dict):
+        for class_id, stats in sorted(
+            queueing_latency_by_class.items(),
+            key=lambda item: _metric_entity_sort_key(item[0]),
+        ):
+            if not isinstance(stats, dict):
+                continue
+            for metric_key in ("count", "mean", "median", "p95", "p99"):
+                out[
+                    f"breakdown.service.queueing_latency.class_{class_id}.{metric_key}"
+                ] = stats.get(metric_key, 0)
+
+    queueing_latency_by_worker = summary.get("queueing_latency_by_worker", {})
+    if isinstance(queueing_latency_by_worker, dict):
+        for worker_id, stats in sorted(
+            queueing_latency_by_worker.items(),
+            key=lambda item: _metric_entity_sort_key(item[0]),
+        ):
+            if not isinstance(stats, dict):
+                continue
+            for metric_key in ("count", "mean", "median", "p95", "p99"):
+                out[
+                    f"breakdown.worker.queueing_latency.worker_{worker_id}.{metric_key}"
+                ] = stats.get(metric_key, 0)
+
     drop_by_class = summary.get("drop_by_class", {})
     if isinstance(drop_by_class, dict):
         for class_id, stats in sorted(
@@ -709,6 +739,10 @@ def _write_results_csv(
         "median_latency",
         "p95_latency",
         "p99_latency",
+        "mean_queueing_latency",
+        "median_queueing_latency",
+        "p95_queueing_latency",
+        "p99_queueing_latency",
         "error",
     ]
     fixed_set = set(fixed_fields)
@@ -871,6 +905,10 @@ def _execute_case_job(
             "median_latency": summary.get("median_latency", 0.0),
             "p95_latency": summary.get("p95_latency", 0.0),
             "p99_latency": summary.get("p99_latency", 0.0),
+            "mean_queueing_latency": summary.get("mean_queueing_latency", 0.0),
+            "median_queueing_latency": summary.get("median_queueing_latency", 0.0),
+            "p95_queueing_latency": summary.get("p95_queueing_latency", 0.0),
+            "p99_queueing_latency": summary.get("p99_queueing_latency", 0.0),
             "error": "",
         }
         row.update(selected_values)
@@ -890,6 +928,10 @@ def _execute_case_job(
             "median_latency": 0.0,
             "p95_latency": 0.0,
             "p99_latency": 0.0,
+            "mean_queueing_latency": 0.0,
+            "median_queueing_latency": 0.0,
+            "p95_queueing_latency": 0.0,
+            "p99_queueing_latency": 0.0,
             "error": str(error),
         }
         row.update(selected_values)
@@ -1287,6 +1329,10 @@ def main() -> None:
                                 "median_latency": 0.0,
                                 "p95_latency": 0.0,
                                 "p99_latency": 0.0,
+                                "mean_queueing_latency": 0.0,
+                                "median_queueing_latency": 0.0,
+                                "p95_queueing_latency": 0.0,
+                                "p99_queueing_latency": 0.0,
                                 "error": str(error),
                             }
                             row.update(dict(job_args["selected_values"]))

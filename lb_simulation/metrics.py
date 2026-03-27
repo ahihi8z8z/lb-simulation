@@ -21,6 +21,16 @@ def _max_gap(values: List[float]) -> float:
     return max(values) - min(values)
 
 
+def _distribution_summary(values: List[float]) -> Dict[str, float]:
+    return {
+        "count": len(values),
+        "mean": statistics.fmean(values) if values else 0.0,
+        "median": statistics.median(values) if values else 0.0,
+        "p95": percentile(values, 95),
+        "p99": percentile(values, 99),
+    }
+
+
 class MetricsCollector:
     """Collect latency, throughput, utilization, and queue/load samples."""
 
@@ -29,6 +39,9 @@ class MetricsCollector:
         self.latencies: List[float] = []
         self.latencies_by_class: Dict[int, List[float]] = {}
         self.latencies_by_worker: Dict[int, List[float]] = {}
+        self.queueing_latencies: List[float] = []
+        self.queueing_latencies_by_class: Dict[int, List[float]] = {}
+        self.queueing_latencies_by_worker: Dict[int, List[float]] = {}
         self.total_job_size = 0
         self.total_job_size_by_class: Dict[int, int] = {}
         self.worker_busy_time: List[float] = [0.0 for _ in range(num_workers)]
@@ -81,24 +94,37 @@ class MetricsCollector:
         job_size: int,
         latency: float,
         service_time: float,
+        queueing_latency: Optional[float] = None,
         busy_time: Optional[float] = None,
     ) -> None:
         self.completion_count += 1
         self.latencies.append(latency)
+        queueing_latency_value = (
+            max(0.0, float(latency) - float(service_time))
+            if queueing_latency is None
+            else max(0.0, float(queueing_latency))
+        )
+        self.queueing_latencies.append(queueing_latency_value)
         busy_time_value = service_time if busy_time is None else busy_time
         self.worker_busy_time[worker_id] += max(0.0, float(busy_time_value))
         self.latencies_by_class.setdefault(class_id, []).append(latency)
         self.latencies_by_worker.setdefault(worker_id, []).append(latency)
+        self.queueing_latencies_by_class.setdefault(class_id, []).append(queueing_latency_value)
+        self.queueing_latencies_by_worker.setdefault(worker_id, []).append(queueing_latency_value)
         self.total_job_size += int(job_size)
         self.total_job_size_by_class[class_id] = (
             self.total_job_size_by_class.get(class_id, 0) + int(job_size)
         )
         logger.debug(
-            "Completion metric recorded worker=%d class=%d job_size=%d latency=%.4f",
+            (
+                "Completion metric recorded worker=%d class=%d job_size=%d "
+                "latency=%.4f queueing_latency=%.4f"
+            ),
             worker_id,
             class_id,
             job_size,
             latency,
+            queueing_latency_value,
         )
 
     def summarize(self, sim_time: float, active_time: float) -> Dict[str, object]:
@@ -108,30 +134,35 @@ class MetricsCollector:
         median_latency = statistics.median(self.latencies) if self.latencies else 0.0
         p95 = percentile(self.latencies, 95)
         p99 = percentile(self.latencies, 99)
+        mean_queueing_latency = (
+            statistics.fmean(self.queueing_latencies) if self.queueing_latencies else 0.0
+        )
+        median_queueing_latency = (
+            statistics.median(self.queueing_latencies) if self.queueing_latencies else 0.0
+        )
+        p95_queueing_latency = percentile(self.queueing_latencies, 95)
+        p99_queueing_latency = percentile(self.queueing_latencies, 99)
 
         utilization = [
             (busy / sim_time) if sim_time > 0 else 0.0 for busy in self.worker_busy_time
         ]
         by_class = {
-            class_id: {
-                "count": len(values),
-                "mean": statistics.fmean(values) if values else 0.0,
-                "median": statistics.median(values) if values else 0.0,
-                "p95": percentile(values, 95),
-                "p99": percentile(values, 99),
-            }
+            class_id: _distribution_summary(values)
             for class_id, values in sorted(self.latencies_by_class.items())
         }
+        queueing_by_class = {
+            class_id: _distribution_summary(values)
+            for class_id, values in sorted(self.queueing_latencies_by_class.items())
+        }
         by_worker: Dict[int, Dict[str, object]] = {}
+        queueing_by_worker: Dict[int, Dict[str, object]] = {}
         for worker_id in range(len(self.worker_busy_time)):
-            values = self.latencies_by_worker.get(worker_id, [])
-            by_worker[worker_id] = {
-                "count": len(values),
-                "mean": statistics.fmean(values) if values else 0.0,
-                "median": statistics.median(values) if values else 0.0,
-                "p95": percentile(values, 95),
-                "p99": percentile(values, 99),
-            }
+            by_worker[worker_id] = _distribution_summary(
+                self.latencies_by_worker.get(worker_id, [])
+            )
+            queueing_by_worker[worker_id] = _distribution_summary(
+                self.queueing_latencies_by_worker.get(worker_id, [])
+            )
 
         worker_latency_means = [float(stats.get("mean", 0.0)) for stats in by_worker.values()]
         service_latency_means = [float(stats.get("mean", 0.0)) for stats in by_class.values()]
@@ -189,6 +220,10 @@ class MetricsCollector:
             "median_latency": median_latency,
             "p95_latency": p95,
             "p99_latency": p99,
+            "mean_queueing_latency": mean_queueing_latency,
+            "median_queueing_latency": median_queueing_latency,
+            "p95_queueing_latency": p95_queueing_latency,
+            "p99_queueing_latency": p99_queueing_latency,
             "avg_queue_len": statistics.fmean(self.queue_samples) if self.queue_samples else 0.0,
             "avg_global_inflight": (
                 statistics.fmean(self.global_inflight_samples)
@@ -205,6 +240,8 @@ class MetricsCollector:
             "utilization_by_worker": utilization,
             "latency_by_class": by_class,
             "latency_by_worker": by_worker,
+            "queueing_latency_by_class": queueing_by_class,
+            "queueing_latency_by_worker": queueing_by_worker,
             "drop_by_class": drop_by_class,
             "drop_by_worker": drop_by_worker,
         }

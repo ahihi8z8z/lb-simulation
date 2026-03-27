@@ -559,6 +559,12 @@ def _build_grouped_summary_payload(
                 "p95": metrics_summary.get("p95_latency", 0.0),
                 "p99": metrics_summary.get("p99_latency", 0.0),
             },
+            "queueing_latency": {
+                "mean": metrics_summary.get("mean_queueing_latency", 0.0),
+                "median": metrics_summary.get("median_queueing_latency", 0.0),
+                "p95": metrics_summary.get("p95_queueing_latency", 0.0),
+                "p99": metrics_summary.get("p99_queueing_latency", 0.0),
+            },
             "queueing": {
                 "avg_queue_len": metrics_summary.get("avg_queue_len", 0.0),
                 "avg_global_inflight": metrics_summary.get("avg_global_inflight", 0.0),
@@ -597,6 +603,8 @@ def _build_grouped_summary_payload(
             "job_size_by_class": metrics_summary.get("total_job_size_by_class", {}),
             "latency_by_class": metrics_summary.get("latency_by_class", {}),
             "latency_by_worker": metrics_summary.get("latency_by_worker", {}),
+            "queueing_latency_by_class": metrics_summary.get("queueing_latency_by_class", {}),
+            "queueing_latency_by_worker": metrics_summary.get("queueing_latency_by_worker", {}),
             "drop_by_class": metrics_summary.get("drop_by_class", {}),
             "drop_by_worker": metrics_summary.get("drop_by_worker", {}),
             "utilization_by_worker": metrics_summary.get("utilization_by_worker", []),
@@ -1145,6 +1153,10 @@ def print_summary(summary: Dict[str, object]) -> None:
     print(f"median latency (s)    : {summary['median_latency']:.4f}")
     print(f"p95 latency (s)       : {summary['p95_latency']:.4f}")
     print(f"p99 latency (s)       : {summary['p99_latency']:.4f}")
+    print(f"mean waiting time (s) : {summary.get('mean_queueing_latency', 0.0):.4f}")
+    print(f"median waiting (s)    : {summary.get('median_queueing_latency', 0.0):.4f}")
+    print(f"p95 waiting time (s)  : {summary.get('p95_queueing_latency', 0.0):.4f}")
+    print(f"p99 waiting time (s)  : {summary.get('p99_queueing_latency', 0.0):.4f}")
     print(f"avg queue len         : {summary['avg_queue_len']:.4f}")
     print(f"avg global inflight   : {summary['avg_global_inflight']:.4f}")
     print(f"avg utilization       : {summary['avg_utilization']:.4f}")
@@ -1191,6 +1203,15 @@ def print_summary(summary: Dict[str, object]) -> None:
                 f"mean={stats['mean']:.4f}s p95={stats['p95']:.4f}s"
             )
 
+    queueing_by_class = summary.get("queueing_latency_by_class", {})
+    if isinstance(queueing_by_class, dict) and queueing_by_class:
+        print("\nWaiting time by class:")
+        for class_id, stats in queueing_by_class.items():
+            print(
+                f"  class {class_id}: count={stats['count']} "
+                f"mean={stats['mean']:.4f}s p95={stats['p95']:.4f}s"
+            )
+
     total_job_size_by_class = summary.get("total_job_size_by_class", {})
     if isinstance(total_job_size_by_class, dict) and total_job_size_by_class:
         print("\nTotal job size by class:")
@@ -1210,6 +1231,15 @@ def print_summary(summary: Dict[str, object]) -> None:
     if isinstance(by_worker, dict) and by_worker:
         print("\nLatency by worker:")
         for worker_id, stats in by_worker.items():
+            print(
+                f"  worker {worker_id}: count={stats['count']} "
+                f"mean={stats['mean']:.4f}s p95={stats['p95']:.4f}s"
+            )
+
+    queueing_by_worker = summary.get("queueing_latency_by_worker", {})
+    if isinstance(queueing_by_worker, dict) and queueing_by_worker:
+        print("\nWaiting time by worker:")
+        for worker_id, stats in queueing_by_worker.items():
             print(
                 f"  worker {worker_id}: count={stats['count']} "
                 f"mean={stats['mean']:.4f}s p95={stats['p95']:.4f}s"
